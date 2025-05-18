@@ -1,0 +1,35 @@
+.nav-bar {
+    display: flex;
+    border: 1px solid black;
+    position: static;
+}
+
+.header-nav {
+    display: flex;
+    list-style-type: none;
+    flex: 1;
+    align-items: flex-start;
+    justify-items: flex-start;
+}
+
+.nav-text {
+    flex: 1;
+    text-decoration: none;
+    color: black;
+    padding: 4px;
+    padding-right: 8px;
+}
+
+.nav-text:hover {
+    border-bottom: 1px solid black;
+    border-right: 1px solid black;
+    color: gray;
+}
+
+.logo {
+    flex: 1;
+    position: relative;
+    height: 50px;
+    width: 50px;
+
+}
