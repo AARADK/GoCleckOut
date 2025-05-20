@@ -51,18 +51,11 @@ if ($row) {
             <i class="fas fa-tachometer-alt"></i> Dashboard
          </a>
       </li>
-      
-      <!-- Dropdown for Products -->
-      <!-- <li class="nav-item dropdown">
-         <a class="nav-link dropdown-toggle <?= $show?>" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-            <i class="fas fa-cogs"></i> Products
+      <li class="nav-item">
+         <a class="nav-link <?= $show?>" href="index.php?page=shops">
+            <i class="fas fa-box"></i> Shops
          </a>
-         <div class="dropdown-menu" aria-labelledby="navbarDropdown">
-            <a class="dropdown-item" href="index.php?page=shop1">Shop 1</a>
-            <a class="dropdown-item" href="index.php?page=shop2">Shop 2</a>
-         </div>
-      </li> -->
-      
+      </li>
       <li class="nav-item">
          <a class="nav-link <?= $show?>" href="index.php?page=products">
             <i class="fas fa-box"></i> Products
@@ -71,11 +64,6 @@ if ($row) {
       <li class="nav-item">
          <a class="nav-link <?= $show?>" href="index.php?page=orders">
             <i class="fas fa-box"></i> Orders
-         </a>
-      </li>
-      <li class="nav-item">
-         <a class="nav-link <?= $show?>" href="index.php?page=shops">
-            <i class="fas fa-box"></i> Shops
          </a>
       </li>
       <li class="nav-item">

@@ -65,7 +65,7 @@ $topSelling = array_slice($selectedProducts, 0, 3);
                 <h2 class="text-center fw-bold mb-4">Featured Categories</h2>
                 <div class="row text-center g-4">
                     <div class="col">
-                        <div class="d-flex flex-column align-items-center">
+                        <div class="d-flex flex-column align-items-center" onclick="location.href='user/product_page.php?category=greengrocer'">
                             <div class="shop-icon">
                                 <i class="fas fa-apple-alt category-icon"></i>
                             </div>
@@ -73,7 +73,7 @@ $topSelling = array_slice($selectedProducts, 0, 3);
                         </div>
                     </div>
                     <div class="col">
-                        <div class="d-flex flex-column align-items-center">
+                        <div class="d-flex flex-column align-items-center" onclick="location.href='user/product_page.php?category=fishmonger'">
                             <div class="shop-icon">
                                 <i class="fas fa-fish category-icon"></i>
                             </div>
@@ -81,7 +81,7 @@ $topSelling = array_slice($selectedProducts, 0, 3);
                         </div>
                     </div>
                     <div class="col">
-                        <div class="d-flex flex-column align-items-center">
+                        <div class="d-flex flex-column align-items-center" onclick="location.href='user/product_page.php?category=delicatessen'">
                             <div class="shop-icon">
                                 <i class="fas fa-cheese category-icon"></i>
                             </div>
@@ -89,7 +89,7 @@ $topSelling = array_slice($selectedProducts, 0, 3);
                         </div>
                     </div>
                     <div class="col">
-                        <div class="d-flex flex-column align-items-center">
+                        <div class="d-flex flex-column align-items-center" onclick="location.href='user/product_page.php?category=bakery'">
                             <div class="shop-icon">
                                 <i class="fas fa-cookie category-icon"></i>
                             </div>
@@ -97,7 +97,7 @@ $topSelling = array_slice($selectedProducts, 0, 3);
                         </div>
                     </div>
                     <div class="col">
-                        <div class="d-flex flex-column align-items-center">
+                        <div class="d-flex flex-column align-items-center" onclick="location.href='user/product_page.php?category=butcher'">
                             <div class="shop-icon">
                                 <i class="fas fa-drumstick-bite category-icon"></i>
                             </div>

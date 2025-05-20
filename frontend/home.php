@@ -1,8 +1,8 @@
 <?php
-ob_start();
 if (session_status() != PHP_SESSION_ACTIVE) session_start();
 
-echo session_id();
+include '../backend/database/connect.php';
+$conn = getDBConnection();
 
 if (isset($_GET["logged_in"])) {
     $logged_in = $_GET["logged_in"] == "true" ? "true" : "false";
@@ -18,12 +18,99 @@ if (isset($_GET["email"])) {
     $_SESSION["email"] = $_GET["email"] ?? "";
 }
 
-include 'header.php';
-
 if (!isset($_SESSION['logged_in'])):
     $_SESSION['logged_in'] = false;
 endif;
+
+$user_id = $_SESSION['user_id'] ?? null;
+
+// Add to cart functionality
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
+   $product_id = (int) $_POST['product_id'];
+   $qty = (int) $_POST['qty'];
+
+   // Get current cart total
+   $total_sql = "
+       SELECT SUM(cp.quantity) as total_quantity
+       FROM cart_product cp
+       JOIN cart c ON cp.cart_id = c.cart_id
+       WHERE c.user_id = :user_id
+   ";
+   $stmt = oci_parse($conn, $total_sql);
+   oci_bind_by_name($stmt, ":user_id", $user_id);
+   oci_execute($stmt);
+   $total_row = oci_fetch_array($stmt, OCI_ASSOC);
+   $current_total = $total_row['TOTAL_QUANTITY'] ?? 0;
+   oci_free_statement($stmt);
+
+   // Check if adding this quantity would exceed the limit
+   if ($current_total + $qty > 20) {
+      $_SESSION['toast_message'] = "Cannot add items: Cart would exceed 20 items limit";
+      $_SESSION['toast_type'] = "error";
+      header("Location: " . $_SERVER['REQUEST_URI']);
+      exit;
+   }
+
+   // Check if user has an existing cart
+   $sql = "SELECT * FROM cart WHERE user_id = :user_id";
+   $stmt = oci_parse($conn, $sql);
+   oci_bind_by_name($stmt, ":user_id", $user_id);
+   oci_execute($stmt);
+   $cart = oci_fetch_array($stmt, OCI_ASSOC);
+   oci_free_statement($stmt);
+
+   if (!$cart) {
+      // Insert new cart
+      $insert_cart_sql = "INSERT INTO cart (cart_id, user_id, add_date) VALUES (cart_seq.NEXTVAL, :user_id, SYSDATE) RETURNING cart_id INTO :cart_id";
+      $stmt = oci_parse($conn, $insert_cart_sql);
+      oci_bind_by_name($stmt, ":user_id", $user_id);
+      oci_bind_by_name($stmt, ":cart_id", $cart_id, 20);
+      oci_execute($stmt);
+      oci_free_statement($stmt);
+   } else {
+      $cart_id = $cart['CART_ID'];
+   }
+
+   // Check if product is already in the cart
+   $check_product_sql = "SELECT * FROM cart_product WHERE cart_id = :cart_id AND product_id = :product_id";
+   $stmt = oci_parse($conn, $check_product_sql);
+   oci_bind_by_name($stmt, ":cart_id", $cart_id);
+   oci_bind_by_name($stmt, ":product_id", $product_id);
+   oci_execute($stmt);
+   $product_exists = oci_fetch_array($stmt, OCI_ASSOC);
+   oci_free_statement($stmt);
+
+   if ($product_exists) {
+      $_SESSION['toast_message'] = "Product already in cart!";
+      $_SESSION['toast_type'] = "error";
+   } else {
+      // Add product to cart
+      $insert_product_sql = "INSERT INTO cart_product (cart_id, product_id, quantity) VALUES (:cart_id, :product_id, :qty)";
+      $stmt = oci_parse($conn, $insert_product_sql);
+      oci_bind_by_name($stmt, ":cart_id", $cart_id);
+      oci_bind_by_name($stmt, ":product_id", $product_id);
+      oci_bind_by_name($stmt, ":qty", $qty);
+      oci_execute($stmt);
+      oci_free_statement($stmt);
+
+      // Update stock
+      $update_stock_sql = "UPDATE product SET stock = stock - :qty WHERE product_id = :product_id";
+      $stmt = oci_parse($conn, $update_stock_sql);
+      oci_bind_by_name($stmt, ":qty", $qty);
+      oci_bind_by_name($stmt, ":product_id", $product_id);
+      oci_execute($stmt);
+      oci_free_statement($stmt);
+
+      $_SESSION['toast_message'] = "Product added!";
+      $_SESSION['toast_type'] = "success";
+   }
+
+   // Redirect to same page to avoid form resubmission
+   header("Location: " . $_SERVER['REQUEST_URI']);
+   exit;
+}
 ?>
+
 <html>
 
 <head>
@@ -32,7 +119,8 @@ endif;
     <title>GoCleckOut - Home</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="./css/home.css">
-    <!-- <script src="cart.js"></script> -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
     <style>
         .category-item:hover {
             background-color: #2563EB;
@@ -122,17 +210,12 @@ endif;
             display: inline-block;
             margin-top: 5px;
             padding: 3px 8px;
-            /* Smaller size */
             background-color: transparent;
-            /* No fill */
             color: #3B82F6;
             border: 1px solid #3B82F6;
-            /* Thinner border */
             border-radius: 12px;
-            /* More rounded corners */
             cursor: pointer;
             font-size: 12px;
-            /* Smaller text */
             transition: 0.3s;
             font-weight: bold;
         }
@@ -225,23 +308,55 @@ endif;
             transform: scale(1.05);
             box-shadow: 0 4px 8px rgba(255, 147, 147, 0.43);
         }
+
+        .btn-explore {
+            background-color: #ff6b6b;
+            color: white;
+            padding: 12px 25px;
+            font-size: 16px;
+            border-radius: 10px;
+            text-decoration: none;
+            transition: background-color 0.3s ease;
+        }
+
+        .btn-explore:hover {
+            background-color: #e55a5a;
+        }
     </style>
 </head>
 
 <body class="home-body">
+
+    <?php include 'header.php' ?>
+
     <div class="hero-section d-flex align-items-center justify-content-center text-center">
         <div>
             <h1 class="hero-title">Welcome to GoCleckOut</h1>
             <p class="hero-subtitle">Discover fresh and quality products from your local sellers</p>
-            <a href="user/product_page.php" class="btn btn-explore">Explore</a>
+            <a href="user/product_page.php" class="btn-explore">Explore</a>
         </div>
     </div>
     <div class="container-main">
         <div class="popup-cart"></div>
-        <?php
-        include "home_products_render.php"
-        ?>
+        <?php include 'user/product_list.php' ?>
     </div>
-    <?php //include "footer.php" ?>
+    <?php include "footer.php" ?>
+
+    <?php 
+
+    if (isset($_SESSION['toast_message'])) {
+        echo "<script>
+            Toastify({
+                text: '" . $_SESSION['toast_message'] . "',
+                duration: 3000,
+                gravity: 'top',
+                position: 'right',
+                backgroundColor: '" . ($_SESSION['toast_type'] === 'success' ? '#28a745' : '#dc3545') . "',
+            }).showToast();
+        </script>";
+        unset($_SESSION['toast_message']);
+        unset($_SESSION['toast_type']);
+    }
+    ?>
 </body>
 </html>

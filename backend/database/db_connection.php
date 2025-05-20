@@ -2,7 +2,7 @@
 include_once 'connect.php';
 $conn = getDBConnection();
 
-function executeQuery($conn, $sql)
+function executeSQL($conn, $sql)
 {
     $stmt = oci_parse($conn, $sql);
     if (!oci_execute($stmt)) {

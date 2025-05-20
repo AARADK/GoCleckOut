@@ -1,5 +1,79 @@
-<?php 
+<?php
 session_start();
+require_once '/xampp/htdocs/GCO/backend/database/connect.php';
+
+$conn = getDBConnection();
+if (!$conn) {
+    die("Database connection failed");
+}
+
+$user_id = $_SESSION['user_id'] ?? null;
+
+// category: butcher, greengrocer, fishmonger, delicatessen, bakery
+$category = $_GET['category'] ?? 'butcher';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
+   $product_id = (int) $_POST['product_id'];
+   $qty = (int) $_POST['qty'];
+
+   // Check if user has an existing cart
+   $sql = "SELECT * FROM cart WHERE user_id = :user_id";
+   $stmt = oci_parse($conn, $sql);
+   oci_bind_by_name($stmt, ":user_id", $user_id);
+   oci_execute($stmt);
+   $cart = oci_fetch_array($stmt, OCI_ASSOC);
+   oci_free_statement($stmt);
+
+   if (!$cart) {
+      // Insert new cart
+      $insert_cart_sql = "INSERT INTO cart (cart_id, user_id, add_date) VALUES (cart_seq.NEXTVAL, :user_id, SYSDATE) RETURNING cart_id INTO :cart_id";
+      $stmt = oci_parse($conn, $insert_cart_sql);
+      oci_bind_by_name($stmt, ":user_id", $user_id);
+      oci_bind_by_name($stmt, ":cart_id", $cart_id, 20);
+      oci_execute($stmt);
+      oci_free_statement($stmt);
+   } else {
+      $cart_id = $cart['CART_ID'];
+   }
+
+   // Check if product is already in the cart
+   $check_product_sql = "SELECT * FROM cart_product WHERE cart_id = :cart_id AND product_id = :product_id";
+   $stmt = oci_parse($conn, $check_product_sql);
+   oci_bind_by_name($stmt, ":cart_id", $cart_id);
+   oci_bind_by_name($stmt, ":product_id", $product_id);
+   oci_execute($stmt);
+   $product_exists = oci_fetch_array($stmt, OCI_ASSOC);
+   oci_free_statement($stmt);
+
+   if ($product_exists) {
+      $_SESSION['toast_message'] = "Product already in cart!";
+      $_SESSION['toast_type'] = "error";
+   } else {
+      // Add product to cart
+      $insert_product_sql = "INSERT INTO cart_product (cart_id, product_id, quantity) VALUES (:cart_id, :product_id, :qty)";
+      $stmt = oci_parse($conn, $insert_product_sql);
+      oci_bind_by_name($stmt, ":cart_id", $cart_id);
+      oci_bind_by_name($stmt, ":product_id", $product_id);
+      oci_bind_by_name($stmt, ":qty", $qty);
+      oci_execute($stmt);
+      oci_free_statement($stmt);
+
+      // Update stock
+      $update_stock_sql = "UPDATE product SET stock = stock - :qty WHERE product_id = :product_id";
+      $stmt = oci_parse($conn, $update_stock_sql);
+      oci_bind_by_name($stmt, ":qty", $qty);
+      oci_bind_by_name($stmt, ":product_id", $product_id);
+      oci_execute($stmt);
+      oci_free_statement($stmt);
+
+      $_SESSION['toast_message'] = "Product added!";
+      $_SESSION['toast_type'] = "success";
+   }
+
+   // Redirect to same page to avoid form resubmission
+   header("Location: " . $_SERVER['REQUEST_URI']);
+   exit;
+}
 ?>
 
 <head>
@@ -100,24 +174,6 @@ session_start();
   <!-- Header -->
   <?php include "../header.php" ?>
 
-  <!-- Breadcrumb with background and centered text -->
-<div class="container-fluid" style="background-color: #ff6b6b;">
-    <div class="container py-2">
-      <nav aria-label="breadcrumb">
-        <ol class="breadcrumb mb-0 justify-content-center" style="background-color: transparent;">
-          <li class="breadcrumb-item">
-            <a href="#" style="color: white; text-decoration: none;">Product</a>
-          </li>
-          <li class="breadcrumb-item">
-            <a href="#" style="color: white; text-decoration: none;">Category Page</a>
-          </li>
-          <li class="breadcrumb-item active text-white" aria-current="page">Butcher</li>
-        </ol>
-      </nav>
-    </div>
-  </div>
-  
-
   <div class="container-fluid">
     <div class="row">
       <!-- Sidebar -->
@@ -125,25 +181,31 @@ session_start();
         <div class="category-box">
           <h5>Product Category</h5>
           <div class="form-check">
-            <input class="form-check-input" type="radio" name="category" id="butcher" checked />
+            <input class="form-check-input" type="radio" name="category" id="butcher" value="butcher"
+              <?= $category === 'butcher' ? 'checked' : '' ?>>
             <label class="form-check-label" for="butcher">Butcher</label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="radio" name="category" id="fishmonger" />
+            <input class="form-check-input" type="radio" name="category" id="fishmonger" value="fishmonger"
+              <?= $category === 'fishmonger' ? 'checked' : '' ?>>
             <label class="form-check-label" for="fishmonger">Fishmonger</label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="radio" name="category" id="bakery" />
+            <input class="form-check-input" type="radio" name="category" id="bakery" value="bakery"
+              <?= $category === 'bakery' ? 'checked' : '' ?>>
             <label class="form-check-label" for="bakery">Bakery</label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="radio" name="category" id="delicatessen" />
+            <input class="form-check-input" type="radio" name="category" id="delicatessen" value="delicatessen"
+              <?= $category === 'delicatessen' ? 'checked' : '' ?>>
             <label class="form-check-label" for="delicatessen">Delicatessen</label>
           </div>
           <div class="form-check">
-            <input class="form-check-input" type="radio" name="category" id="greengrocer" />
+            <input class="form-check-input" type="radio" name="category" id="greengrocer" value="greengrocer"
+              <?= $category === 'greengrocer' ? 'checked' : '' ?>>
             <label class="form-check-label" for="greengrocer">Greengrocer</label>
           </div>
+
 
           <label class="mt-4">Filter By Price</label>
           <input type="range" class="form-range" min="20" max="350" />
@@ -170,42 +232,5 @@ session_start();
   </div>
 
   <!-- Footer -->
-  <div class="footer">
-    <div class="container">
-      <div class="row">
-        <div class="col-md-3">
-          <h6>GoCleckOut</h6>
-          <p>GoCleckOut is the biggest market of grocery products. Get your daily needs from our store.</p>
-          <p><i class="fa fa-envelope"></i> GoCleckOutHelp@gmail.com</p>
-          <p><i class="fa fa-phone"></i> +977 9800000000</p>
-        </div>
-        <div class="col-md-3">
-          <h6>Company</h6>
-          <p><a href="#">About Us</a></p>
-          <p><a href="#">Privacy Policy</a></p>
-          <p><a href="#">Terms & Conditions</a></p>
-          <p><a href="#">Contact Us</a></p>
-        </div>
-        <div class="col-md-3">
-          <h6>Category</h6>
-          <p><a href="#">Butcher</a></p>
-          <p><a href="#">Fishmonger</a></p>
-          <p><a href="#">Delicatessen</a></p>
-          <p><a href="#">Greengrocer</a></p>
-        </div>
-        <div class="col-md-3">
-          <h6>Connect with us</h6>
-          <p>
-            <i class="fab fa-facebook"></i>
-            <i class="fab fa-twitter"></i>
-            <i class="fab fa-instagram"></i>
-          </p>
-          <img src="paypal.png" alt="Paypal" style="height: 30px" />
-        </div>
-      </div>
-    </div>
-    <div class="text-center py-3 text-muted">
-      &copy; 2025 <span style="color: #ff6b6b">GoCleckOut</span>, All rights reserved.
-    </div>
-  </div>
+  <?php include "../footer.php" ?>
 </body>

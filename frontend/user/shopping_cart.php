@@ -1,6 +1,10 @@
 <?php
 require '../../backend/database/connect.php';
 
+include "timeslot_date.php";
+
+$timeslots = getTimeslots(10);
+
 $conn = getDBConnection();
 if (!$conn) {
     die("Database connection failed");
@@ -11,7 +15,8 @@ if (isset($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
     $user_id = $_SESSION['user_id'];
 } else {
     $user_id = 3;
-    echo("User not logged in.");
+
+    echo ("User not logged in.");
 }
 
 
@@ -19,7 +24,7 @@ if (isset($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])) {
 $cart_items = [];
 $sql = "SELECT c.cart_id, p.product_id, p.product_name, p.product_image, p.price, p.stock, pc.quantity
         FROM cart c
-        JOIN product_cart pc ON c.cart_id = pc.cart_id
+        JOIN cart_product pc ON c.cart_id = pc.cart_id
         JOIN product p ON pc.product_id = p.product_id
         WHERE c.user_id = :user_id";
 
@@ -237,6 +242,17 @@ $total_price = 0;
         </div>
 
     </section>
+
+    <div class="mt-4">
+        Timeslots:<br>
+        <select name="timeslot">
+            <?php foreach ($timeslots as $ts): ?>
+                <option value="<?= htmlspecialchars($ts['timestamp']) ?>">
+                    <?= htmlspecialchars($ts['label']) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
 
     <script>
         function updateQuantity(productId, change, button) {

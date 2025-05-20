@@ -1,5 +1,9 @@
-RewriteEngine On
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_URI} !\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|mp4|webm|ogg|mp3|wav)$
+# RewriteEngine On
+
+RewriteCond %{REQUEST_URI} ^\/GCO\/frontend\/$ [NC]
+RewriteRule ^ - [L]
+
+RewriteCond %{REQUEST_URI} ^/GCO/frontend/(index\.php|home\.php|User_Profile\.php|cart\.php)\.php$ [NC]
+RewriteRule ^ - [L]
+
 RewriteRule ^ index.php [QSA,L]

@@ -4,7 +4,7 @@ $conn = getDBConnection();
 if (isset($_POST['product_id'])) {
     $product_id = $_POST['product_id'];
 
-    $query = "DELETE FROM product_cart WHERE product_id = :product_id";
+    $query = "DELETE FROM cart_product WHERE product_id = :product_id";
     $stmt = oci_parse($conn, $query);
 
     // Bind the product_id parameter
