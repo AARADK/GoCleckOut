@@ -21,122 +21,141 @@ if (!isset($_POST['product_id']) || !isset($_POST['action'])) {
 
 $user_id = $_SESSION['user_id'];
 $product_id = $_POST['product_id'];
-$action = $_POST['action']; // 'increase' or 'decrease'
+$action = $_POST['action']; // 'increase', 'decrease', 'remove', or 'validate'
 
 $conn = getDBConnection();
 
-// Get current cart total quantity
-$total_sql = "
-    SELECT SUM(cp.quantity) as total_quantity
+// Get current item quantity and stock
+$check_sql = "
+    SELECT cp.quantity, p.stock, c.cart_id
     FROM cart_product cp
+    JOIN product p ON cp.product_id = p.product_id
     JOIN cart c ON cp.cart_id = c.cart_id
-    WHERE c.user_id = :user_id
+    WHERE cp.product_id = :product_id AND c.user_id = :user_id
 ";
-$stmt = oci_parse($conn, $total_sql);
+$stmt = oci_parse($conn, $check_sql);
+oci_bind_by_name($stmt, ":product_id", $product_id);
 oci_bind_by_name($stmt, ":user_id", $user_id);
 oci_execute($stmt);
-$total_row = oci_fetch_array($stmt, OCI_ASSOC);
-$current_total = $total_row['TOTAL_QUANTITY'] ?? 0;
+$row = oci_fetch_array($stmt, OCI_ASSOC);
 oci_free_statement($stmt);
 
-// Get current item quantity
-$item_sql = "
-    SELECT cp.quantity
-    FROM cart_product cp
-    JOIN cart c ON cp.cart_id = c.cart_id
-    WHERE c.user_id = :user_id AND cp.product_id = :product_id
-";
-$stmt = oci_parse($conn, $item_sql);
-oci_bind_by_name($stmt, ":user_id", $user_id);
-oci_bind_by_name($stmt, ":product_id", $product_id);
-oci_execute($stmt);
-$item_row = oci_fetch_array($stmt, OCI_ASSOC);
-$current_quantity = $item_row['QUANTITY'] ?? 0;
-oci_free_statement($stmt);
-
-// Get product stock information
-$stock_sql = "
-    SELECT stock, min_order, max_order
-    FROM product
-    WHERE product_id = :product_id
-    FOR UPDATE";  // Add FOR UPDATE to lock the row
-$stmt = oci_parse($conn, $stock_sql);
-oci_bind_by_name($stmt, ":product_id", $product_id);
-oci_execute($stmt);
-$stock_row = oci_fetch_array($stmt, OCI_ASSOC);
-$available_stock = $stock_row['STOCK'] ?? 0;
-$min_order = $stock_row['MIN_ORDER'] ?? 1;
-$max_order = $stock_row['MAX_ORDER'] ?? 1;
-oci_free_statement($stmt);
-
-// Calculate new quantity
-$new_quantity = $current_quantity;
-if ($action === 'increase') {
-    // Check if increasing would exceed max order or available stock
-    if ($current_quantity >= $max_order) {
-        $response['message'] = "Maximum order quantity is $max_order";
-        echo json_encode($response);
-        exit;
-    }
-    if ($current_quantity >= $available_stock) {
-        $response['message'] = "Only $available_stock items available in stock";
-        echo json_encode($response);
-        exit;
-    }
-    $new_quantity = $current_quantity + 1;
-} else if ($action === 'decrease') {
-    // Check if decreasing would go below min order
-    if ($current_quantity <= $min_order) {
-        $response['message'] = "Minimum order quantity is $min_order";
-        echo json_encode($response);
-        exit;
-    }
-    $new_quantity = max($min_order, $current_quantity - 1);
+if (!$row) {
+    $response['success'] = false;
+    $response['message'] = "Item not found in cart";
+    echo json_encode($response);
+    exit;
 }
 
-// Check if new total would exceed limit
-$new_total = $current_total - $current_quantity + $new_quantity;
+$current_quantity = $row['QUANTITY'];
+$available_stock = $row['STOCK'];
+$cart_id = $row['CART_ID'];
+
+// Validate quantity based on action
+if ($action === 'increase') {
+    // Check if increasing would exceed available stock
+    if ($current_quantity + 1 > $available_stock) {
+        $response['success'] = false;
+        $response['message'] = "Cannot increase quantity: Not enough stock available";
+        echo json_encode($response);
+        exit;
+    }
+} elseif ($action === 'decrease') {
+    // Only check if quantity would go below 1
+    if ($current_quantity - 1 < 1) {
+        $response['success'] = false;
+        $response['message'] = "Cannot decrease quantity below 1";
+        echo json_encode($response);
+        exit;
+    }
+}
+
+// Check cart total limit
+$total_sql = "
+    SELECT SUM(quantity) as total_quantity
+    FROM cart_product
+    WHERE cart_id = :cart_id
+";
+$stmt = oci_parse($conn, $total_sql);
+oci_bind_by_name($stmt, ":cart_id", $cart_id);
+oci_execute($stmt);
+$total_row = oci_fetch_array($stmt, OCI_ASSOC);
+oci_free_statement($stmt);
+
+$cart_total = $total_row['TOTAL_QUANTITY'] ?? 0;
+$new_total = $cart_total;
+
+if ($action === 'increase') {
+    $new_total = $cart_total + 1;
+} elseif ($action === 'decrease') {
+    $new_total = $cart_total - 1;
+} elseif ($action === 'remove') {
+    $new_total = $cart_total - $current_quantity;
+}
+
 if ($new_total > 20) {
-    $response['message'] = 'Cart cannot exceed 20 items total';
+    $response['success'] = false;
+    $response['message'] = "Cannot update quantity: Cart would exceed 20 items limit";
     echo json_encode($response);
     exit;
 }
 
 try {
-    // Start transaction properly
-    oci_execute($conn, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-    
-    if ($new_quantity === 0) {
-        // Remove item from cart and update stock
+    // Start transaction
+    $stmt = oci_parse($conn, "ALTER SESSION SET ISOLATION_LEVEL = SERIALIZABLE");
+    oci_execute($stmt);
+    oci_free_statement($stmt);
+
+    if ($action === 'remove') {
+        // Remove item from cart
         $delete_sql = "
             DELETE FROM cart_product
-            WHERE cart_id IN (SELECT cart_id FROM cart WHERE user_id = :user_id)
+            WHERE cart_id = :cart_id
             AND product_id = :product_id
         ";
         $stmt = oci_parse($conn, $delete_sql);
-        oci_bind_by_name($stmt, ":user_id", $user_id);
+        oci_bind_by_name($stmt, ":cart_id", $cart_id);
         oci_bind_by_name($stmt, ":product_id", $product_id);
         $success = oci_execute($stmt);
         oci_free_statement($stmt);
 
-        if ($success) {
-            // Update stock
-            $update_stock_sql = "
-                UPDATE product 
-                SET stock = stock + :quantity 
-                WHERE product_id = :product_id
-            ";
-            $stmt = oci_parse($conn, $update_stock_sql);
-            oci_bind_by_name($stmt, ":quantity", $current_quantity);
-            oci_bind_by_name($stmt, ":product_id", $product_id);
-            oci_execute($stmt);
-            oci_free_statement($stmt);
+        if (!$success) {
+            throw new Exception("Failed to remove item from cart");
         }
+
+        // Update stock - return the quantity to stock
+        $update_stock_sql = "
+            UPDATE product 
+            SET stock = stock + :quantity 
+            WHERE product_id = :product_id
+        ";
+        $stmt = oci_parse($conn, $update_stock_sql);
+        oci_bind_by_name($stmt, ":quantity", $current_quantity);
+        oci_bind_by_name($stmt, ":product_id", $product_id);
+        $stock_update = oci_execute($stmt);
+        oci_free_statement($stmt);
+
+        if (!$stock_update) {
+            throw new Exception("Failed to update product stock");
+        }
+
+        $response['success'] = true;
+        $response['message'] = 'Item removed from cart';
+        $response['new_quantity'] = 0;
+        $response['new_total'] = $new_total;
     } else {
+        // Handle increase/decrease actions
+        $new_quantity = $current_quantity;
+        if ($action === 'increase') {
+            $new_quantity = $current_quantity + 1;
+        } elseif ($action === 'decrease') {
+            $new_quantity = $current_quantity - 1;
+        }
+
         // Calculate stock change
         $stock_change = $new_quantity - $current_quantity;
         
-        // Update stock first with validation
+        // Update stock
         $update_stock_sql = "
             UPDATE product 
             SET stock = stock - :stock_change 
@@ -147,22 +166,23 @@ try {
         oci_bind_by_name($stmt, ":stock_change", $stock_change);
         oci_bind_by_name($stmt, ":product_id", $product_id);
         $stock_update = oci_execute($stmt);
+        $rows_affected = oci_num_rows($stmt);
         oci_free_statement($stmt);
 
-        if (!$stock_update) {
+        if (!$stock_update || $rows_affected === 0) {
             throw new Exception("Insufficient stock available");
         }
 
-        // Then update cart quantity
+        // Update cart quantity
         $update_sql = "
-            UPDATE cart_product cp
-            SET cp.quantity = :quantity
-            WHERE cp.cart_id IN (SELECT cart_id FROM cart WHERE user_id = :user_id)
-            AND cp.product_id = :product_id
+            UPDATE cart_product 
+            SET quantity = :quantity
+            WHERE cart_id = :cart_id
+            AND product_id = :product_id
         ";
         $stmt = oci_parse($conn, $update_sql);
         oci_bind_by_name($stmt, ":quantity", $new_quantity);
-        oci_bind_by_name($stmt, ":user_id", $user_id);
+        oci_bind_by_name($stmt, ":cart_id", $cart_id);
         oci_bind_by_name($stmt, ":product_id", $product_id);
         $success = oci_execute($stmt);
         oci_free_statement($stmt);
@@ -170,19 +190,30 @@ try {
         if (!$success) {
             throw new Exception("Failed to update cart quantity");
         }
+
+        $response['success'] = true;
+        $response['message'] = 'Cart updated successfully';
+        $response['new_quantity'] = $new_quantity;
+        $response['new_total'] = $new_total;
     }
 
     // Commit transaction
-    oci_execute($conn, "COMMIT");
-
-    $response['success'] = true;
-    $response['message'] = 'Cart updated successfully';
-    $response['new_quantity'] = $new_quantity;
-    $response['new_total'] = $new_total;
+    $stmt = oci_parse($conn, "COMMIT");
+    oci_execute($stmt);
+    oci_free_statement($stmt);
 } catch (Exception $e) {
     // Rollback transaction on error
-    oci_execute($conn, "ROLLBACK");
-    $response['message'] = 'Failed to update cart: ' . $e->getMessage();
+    $stmt = oci_parse($conn, "ROLLBACK");
+    oci_execute($stmt);
+    oci_free_statement($stmt);
+    
+    $response['message'] = $e->getMessage();
+    $response['success'] = false;
+} finally {
+    // Ensure connection is closed
+    if (isset($conn)) {
+        oci_close($conn);
+    }
 }
 
 echo json_encode($response);

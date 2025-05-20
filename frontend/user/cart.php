@@ -23,8 +23,6 @@ function getCartTotal($conn, $user_id) {
     return $total;
 }
 
-$timeslots = getTimeslots(7);
-
 $cart_items = [];
 $total_price = 0;
 $user_id = $_SESSION['user_id'] ?? null;
@@ -32,7 +30,6 @@ $cart_total = 0;
 
 if ($user_id) {
     $cart_total = getCartTotal($conn, $user_id);
-    
     // Get the cart ID for this user
     $cart_sql = "SELECT cart_id FROM cart WHERE user_id = :user_id";
     $cart_stmt = oci_parse($conn, $cart_sql);
@@ -62,6 +59,67 @@ if ($user_id) {
 
         oci_free_statement($stmt);
     }
+}
+
+// Handle coupon application
+$discount_amount = 0;
+$applied_coupon = null;
+$coupon_error = null;
+
+// Check for previously applied coupon first
+if (isset($_SESSION['applied_coupon'])) {
+    $applied_coupon = $_SESSION['applied_coupon'];
+    $discount_amount = ($total_price * $applied_coupon['COUPON_DISCOUNT_PERCENT']) / 100;
+}
+
+// Handle POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $user_id) {
+    if (isset($_POST['apply_coupon'])) {
+        $coupon_code = trim($_POST['coupon_code']);
+        
+        // Validate coupon
+        $coupon_sql = "
+            SELECT * FROM coupon 
+            WHERE coupon_code = :coupon_code 
+            AND coupon_start_date <= SYSDATE 
+            AND coupon_end_date >= SYSDATE
+        ";
+        $stmt = oci_parse($conn, $coupon_sql);
+        oci_bind_by_name($stmt, ":coupon_code", $coupon_code);
+        oci_execute($stmt);
+        $coupon = oci_fetch_array($stmt, OCI_ASSOC);
+        oci_free_statement($stmt);
+
+        if ($coupon) {
+            $_SESSION['applied_coupon'] = $coupon;
+            $_SESSION['toast_message'] = "Coupon applied successfully!";
+            $_SESSION['toast_type'] = "success";
+        } else {
+            $_SESSION['toast_message'] = "Invalid or expired coupon code";
+            $_SESSION['toast_type'] = "error";
+        }
+        
+        // Redirect to GET request
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit;
+    }
+    
+    if (isset($_POST['remove_coupon'])) {
+        unset($_SESSION['applied_coupon']);
+        $_SESSION['toast_message'] = "Coupon removed";
+        $_SESSION['toast_type'] = "success";
+        
+        // Redirect to GET request
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit;
+    }
+}
+
+// Display toast message if set
+if (isset($_SESSION['toast_message'])) {
+    $toast_message = $_SESSION['toast_message'];
+    $toast_type = $_SESSION['toast_type'];
+    unset($_SESSION['toast_message'], $_SESSION['toast_type']);
 }
 
 $timeslots = getTimeslots(7);
@@ -95,78 +153,6 @@ if (isset($_POST['clear_cart']) && $user_id) {
     exit;
 }
 
-if (isset($_POST['remove_product_id']) && $user_id) {
-    $product_id = $_POST['remove_product_id'];
-    
-    // Get cart ID and item quantity
-    $cart_sql = "
-        SELECT c.cart_id, cp.quantity 
-        FROM cart c 
-        JOIN cart_product cp ON c.cart_id = cp.cart_id 
-        WHERE c.user_id = :user_id AND cp.product_id = :product_id";
-    $cart_stmt = oci_parse($conn, $cart_sql);
-    oci_bind_by_name($cart_stmt, ":user_id", $user_id);
-    oci_bind_by_name($cart_stmt, ":product_id", $product_id);
-    oci_execute($cart_stmt);
-    $cart_row = oci_fetch_array($cart_stmt, OCI_ASSOC);
-    oci_free_statement($cart_stmt);
-
-    if ($cart_row) {
-        $cart_id = $cart_row['CART_ID'];
-        $quantity = $cart_row['QUANTITY'];
-        
-        // First update the product stock
-        $update_stock_sql = "
-            UPDATE product 
-            SET stock = stock + :quantity 
-            WHERE product_id = :product_id";
-        $stmt = oci_parse($conn, $update_stock_sql);
-        oci_bind_by_name($stmt, ":quantity", $quantity);
-        oci_bind_by_name($stmt, ":product_id", $product_id);
-        $update_result = oci_execute($stmt);
-        oci_free_statement($stmt);
-
-        if ($update_result) {
-            // Then remove from cart
-            $delete_sql = "DELETE FROM cart_product WHERE cart_id = :cart_id AND product_id = :product_id";
-            $stmt = oci_parse($conn, $delete_sql);
-            oci_bind_by_name($stmt, ":cart_id", $cart_id);
-            oci_bind_by_name($stmt, ":product_id", $product_id);
-            $delete_result = oci_execute($stmt);
-            oci_free_statement($stmt);
-
-            if ($delete_result) {
-                $_SESSION['toast_message'] = "Item removed from cart and stock updated successfully.";
-                $_SESSION['toast_type'] = "success";
-            } else {
-                // If delete fails, try to revert the stock update
-                $revert_stock_sql = "
-                    UPDATE product 
-                    SET stock = stock - :quantity 
-                    WHERE product_id = :product_id";
-                $stmt = oci_parse($conn, $revert_stock_sql);
-                oci_bind_by_name($stmt, ":quantity", $quantity);
-                oci_bind_by_name($stmt, ":product_id", $product_id);
-                oci_execute($stmt);
-                oci_free_statement($stmt);
-
-                $_SESSION['toast_message'] = "Failed to remove item from cart.";
-                $_SESSION['toast_type'] = "error";
-            }
-        } else {
-            $_SESSION['toast_message'] = "Failed to update product stock.";
-            $_SESSION['toast_type'] = "error";
-        }
-    } else {
-        $_SESSION['toast_message'] = "Item not found in cart.";
-        $_SESSION['toast_type'] = "error";
-    }
-
-    // Redirect to avoid form resubmission
-    header("Location: " . $_SERVER['REQUEST_URI']);
-    exit;
-}
-
 // Add this near the top of the file, after session_start()
 if (isset($_POST['add_to_cart']) && $user_id) {
     $product_id = $_POST['product_id'] ?? null;
@@ -177,8 +163,72 @@ if (isset($_POST['add_to_cart']) && $user_id) {
         $_SESSION['toast_message'] = "Cannot add items: Cart would exceed 20 items limit";
         $_SESSION['toast_type'] = "error";
     } else {
-        // Rest of your add to cart logic here
-        // ... existing add to cart code ...
+        // Get or create cart for user
+        $cart_sql = "SELECT cart_id FROM cart WHERE user_id = :user_id";
+        $cart_stmt = oci_parse($conn, $cart_sql);
+        oci_bind_by_name($cart_stmt, ":user_id", $user_id);
+        oci_execute($cart_stmt);
+        $cart_row = oci_fetch_array($cart_stmt, OCI_ASSOC);
+        oci_free_statement($cart_stmt);
+
+        if (!$cart_row) {
+            // Create new cart for user
+            $create_cart_sql = "INSERT INTO cart (user_id, add_date) VALUES (:user_id, SYSDATE) RETURNING cart_id INTO :cart_id";
+            $create_stmt = oci_parse($conn, $create_cart_sql);
+            oci_bind_by_name($create_stmt, ":user_id", $user_id);
+            oci_bind_by_name($create_stmt, ":cart_id", $cart_id, -1, SQLT_INT);
+            oci_execute($create_stmt);
+            oci_free_statement($create_stmt);
+        } else {
+            $cart_id = $cart_row['CART_ID'];
+        }
+
+        // Check if product already in cart
+        $check_sql = "SELECT quantity FROM cart_product WHERE cart_id = :cart_id AND product_id = :product_id";
+        $check_stmt = oci_parse($conn, $check_sql);
+        oci_bind_by_name($check_stmt, ":cart_id", $cart_id);
+        oci_bind_by_name($check_stmt, ":product_id", $product_id);
+        oci_execute($check_stmt);
+        $existing_item = oci_fetch_array($check_stmt, OCI_ASSOC);
+        oci_free_statement($check_stmt);
+
+        if ($existing_item) {
+            // Update quantity if product exists in cart
+            $new_quantity = $existing_item['QUANTITY'] + $quantity;
+            if ($new_quantity > 20) {
+                $_SESSION['toast_message'] = "Cannot add items: Cart would exceed 20 items limit";
+                $_SESSION['toast_type'] = "error";
+            } else {
+                $update_sql = "UPDATE cart_product SET quantity = :quantity WHERE cart_id = :cart_id AND product_id = :product_id";
+                $update_stmt = oci_parse($conn, $update_sql);
+                oci_bind_by_name($update_stmt, ":quantity", $new_quantity);
+                oci_bind_by_name($update_stmt, ":cart_id", $cart_id);
+                oci_bind_by_name($update_stmt, ":product_id", $product_id);
+                if (oci_execute($update_stmt)) {
+                    $_SESSION['toast_message'] = "Cart updated successfully";
+                    $_SESSION['toast_type'] = "success";
+                } else {
+                    $_SESSION['toast_message'] = "Failed to update cart";
+                    $_SESSION['toast_type'] = "error";
+                }
+                oci_free_statement($update_stmt);
+            }
+        } else {
+            // Insert new product into cart
+            $insert_sql = "INSERT INTO cart_product (cart_id, product_id, quantity) VALUES (:cart_id, :product_id, :quantity)";
+            $insert_stmt = oci_parse($conn, $insert_sql);
+            oci_bind_by_name($insert_stmt, ":cart_id", $cart_id);
+            oci_bind_by_name($insert_stmt, ":product_id", $product_id);
+            oci_bind_by_name($insert_stmt, ":quantity", $quantity);
+            if (oci_execute($insert_stmt)) {
+                $_SESSION['toast_message'] = "Product added to cart successfully";
+                $_SESSION['toast_type'] = "success";
+            } else {
+                $_SESSION['toast_message'] = "Failed to add product to cart";
+                $_SESSION['toast_type'] = "error";
+            }
+            oci_free_statement($insert_stmt);
+        }
     }
     
     // Redirect to avoid form resubmission
@@ -282,21 +332,28 @@ if (isset($_POST['add_to_cart']) && $user_id) {
         .quantity-control {
             display: flex;
             align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
         }
 
         .quantity-control button {
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            border: 1px solid #ddd;
-            background: white;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
             font-weight: bold;
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.2s;
         }
 
-        .quantity-control button:hover {
-            background-color: #f8f9fa;
+        .quantity-control button:not(:disabled):hover {
+            background-color: #f44357;
+            color: white;
+            border-color: #f44357;
         }
 
         .quantity-control button:disabled {
@@ -304,9 +361,11 @@ if (isset($_POST['add_to_cart']) && $user_id) {
             cursor: not-allowed;
         }
 
-        .quantity-control span {
-            margin: 0 10px;
+        .quantity-display {
+            font-size: 1.1rem;
             font-weight: bold;
+            min-width: 2rem;
+            text-align: center;
         }
 
         .remove-btn {
@@ -429,7 +488,14 @@ if (isset($_POST['add_to_cart']) && $user_id) {
 
 <body data-cart-total="<?= $cart_total ?>">
     <!-- Toast Container -->
-    <div class="toast-container"></div>
+    <div class="toast-container">
+        <?php if (isset($toast_message)): ?>
+            <div class="toast <?= $toast_type ?>" style="display: block;">
+                <div><?= htmlspecialchars($toast_message) ?></div>
+                <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+            </div>
+        <?php endif; ?>
+    </div>
 
     <!-- Header -->
     <?php include '../header.php' ?>
@@ -466,7 +532,6 @@ if (isset($_POST['add_to_cart']) && $user_id) {
             <div class="col-lg-8">
                 <div class="card mb-4">
                     <div class="card-body">
-                        <!-- Cart Item 1 -->
                         <?php if (!empty($cart_items)): ?>
                             <?php foreach ($cart_items as $item): ?>
                                 <div class="cart-item row align-items-center" data-product-id="<?= $item['PRODUCT_ID'] ?>">
@@ -489,13 +554,21 @@ if (isset($_POST['add_to_cart']) && $user_id) {
                                     </div>
                                     <div class="col-md-3 col-6 mt-3 mt-md-0">
                                         <div class="quantity-control">
-                                            <button class="decrease-btn" <?= $item['QUANTITY'] <= 1 ? 'disabled' : '' ?>>-</button>
-                                            <span class="quantity-display"><?= $item['QUANTITY'] ?></span>
-                                            <button class="increase-btn" <?= $total_items >= 20 ? 'disabled' : '' ?>>+</button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary decrease-btn" 
+                                                    onclick="updateQuantity(<?= $item['PRODUCT_ID'] ?>, 'decrease')"
+                                                    <?= $item['QUANTITY'] <= 1 ? 'disabled' : '' ?>>
+                                                <i class="fas fa-minus"></i>
+                                            </button>
+                                            <span class="quantity-display mx-2"><?= $item['QUANTITY'] ?></span>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary increase-btn"
+                                                    onclick="updateQuantity(<?= $item['PRODUCT_ID'] ?>, 'increase')"
+                                                    <?= $total_items >= 20 ? 'disabled' : '' ?>>
+                                                <i class="fas fa-plus"></i>
+                                            </button>
                                         </div>
                                     </div>
                                     <div class="col-md-1 col-2 text-end mt-3 mt-md-0">
-                                        <button type="button" class="remove-btn" onclick="removeFromCart(<?= $item['PRODUCT_ID'] ?>)">
+                                        <button type="button" class="remove-btn" onclick="removeItem(<?= $item['PRODUCT_ID'] ?>)">
                                             <i class="fa fa-times"></i>
                                         </button>
                                     </div>
@@ -505,18 +578,9 @@ if (isset($_POST['add_to_cart']) && $user_id) {
                             <p>Your cart is empty.</p>
                         <?php endif; ?>
                     </div>
-                    <select>
-                        <?php foreach ($timeslots as $ts): ?>
-                            <option value="<?= htmlspecialchars($ts['timestamp']) ?>">
-                                <?= htmlspecialchars($ts['label']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
                     <div class="card-footer d-flex justify-content-between">
                         <button class="btn btn-outline-primary" onclick="location.href='/GCO/frontend/home.php?logged_in=<?= $_SESSION['logged_in'] ?>'"><i class="fa fa-arrow-left me-2"></i>Continue Shopping</button>
-                        <form action="" method="post">
-                            <button type="submit" name="clear_cart" class="btn btn-outline-danger"><i class="fa fa-trash me-2"></i>Clear Cart</input>
-                        </form>
+                        <button type="button" onclick="confirmClearCart()" class="btn btn-outline-danger"><i class="fa fa-trash me-2"></i>Clear Cart</button>
                     </div>
                 </div>
             </div>
@@ -528,14 +592,57 @@ if (isset($_POST['add_to_cart']) && $user_id) {
                         <span>Subtotal</span>
                         <span id="cart-subtotal">Rs. <?= number_format($total_price, 2) ?></span>
                     </div>
-                    <div class="summary-item">
-                        <span>Shipping</span>
-                        <span>Rs. 5.00</span>
+                    
+                    <!-- Coupon Section -->
+                    <div class="promo-code mt-3">
+                        <?php if ($applied_coupon): ?>
+                            <div class="applied-coupon mb-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>Applied Coupon:</strong>
+                                        <span class="text-success"><?= htmlspecialchars($applied_coupon['COUPON_CODE']) ?></span>
+                                        <br>
+                                        <small class="text-muted"><?= $applied_coupon['COUPON_DISCOUNT_PERCENT'] ?>% off</small>
+                                    </div>
+                                    <form method="post" class="d-inline">
+                                        <button type="submit" name="remove_coupon" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <form method="post" class="coupon-form">
+                                <div class="input-group">
+                                    <input type="text" name="coupon_code" class="form-control" placeholder="Enter coupon code" required>
+                                    <button type="submit" name="apply_coupon" class="btn btn-primary">Apply</button>
+                                </div>
+                                <?php if ($coupon_error): ?>
+                                    <div class="text-danger mt-2 small"><?= htmlspecialchars($coupon_error) ?></div>
+                                <?php endif; ?>
+                            </form>
+                        <?php endif; ?>
                     </div>
+
+                    <?php if ($discount_amount > 0): ?>
+                    <div class="summary-item text-success">
+                        <span>Discount</span>
+                        <span>- Rs. <?= number_format($discount_amount, 2) ?></span>
+                    </div>
+                    <?php endif; ?>
+
                     <div class="summary-item summary-total">
                         <span>Total</span>
-                        <span id="cart-total">Rs. <?= number_format($total_price + 5.00, 2) ?></span>
+                        <span id="cart-total">Rs. <?= number_format($total_price - $discount_amount, 2) ?></span>
                     </div>
+
+                    <?php if (!empty($cart_items)): ?>
+                        <div class="mt-4">
+                            <a href="checkout.php" class="btn btn-primary w-100">
+                                <i class="fas fa-shopping-cart me-2"></i>Proceed to Checkout
+                            </a>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -546,7 +653,11 @@ if (isset($_POST['add_to_cart']) && $user_id) {
     <?php include '../footer.php' ?>
 
     <script>
+        const TOAST_DURATION = 3000; // 3 seconds
+
         function showToast(message, type = 'success') {
+            document.querySelectorAll('.toast').forEach(toast => toast.remove());
+            
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             toast.innerHTML = `
@@ -554,24 +665,54 @@ if (isset($_POST['add_to_cart']) && $user_id) {
                 <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
             `;
             document.querySelector('.toast-container').appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+            
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.remove();
+                }
+            }, TOAST_DURATION);
         }
 
         function updateCartTotals() {
             let subtotal = 0;
+            let totalItems = 0;
+            
             document.querySelectorAll('.cart-item').forEach(item => {
                 const price = parseFloat(item.querySelector('.item-price').dataset.price);
                 const quantity = parseInt(item.querySelector('.quantity-display').textContent);
                 const itemSubtotal = price * quantity;
                 item.querySelector('.item-subtotal').textContent = `Rs. ${itemSubtotal.toFixed(2)}`;
                 subtotal += itemSubtotal;
+                totalItems += quantity;
             });
 
-            const shipping = 5.00;
-            const total = subtotal + shipping;
+            // Update total items badge
+            const badge = document.querySelector('.badge');
+            if (badge) {
+                badge.textContent = `${totalItems} Items`;
+            }
 
-            document.getElementById('cart-subtotal').textContent = `Rs. ${subtotal.toFixed(2)}`;
-            document.getElementById('cart-total').textContent = `Rs. ${total.toFixed(2)}`;
+            // Get discount if coupon is applied
+            const discountElement = document.querySelector('.summary-item.text-success span:last-child');
+            const discount = discountElement ? parseFloat(discountElement.textContent.replace('Rs. ', '').replace(',', '')) : 0;
+            
+            const total = subtotal - discount;
+
+            // Update subtotal and total displays
+            const subtotalElement = document.getElementById('cart-subtotal');
+            const totalElement = document.getElementById('cart-total');
+            
+            if (subtotalElement) {
+                subtotalElement.textContent = `Rs. ${subtotal.toFixed(2)}`;
+            }
+            if (totalElement) {
+                totalElement.textContent = `Rs. ${total.toFixed(2)}`;
+            }
+
+            // Update increase buttons based on total items
+            document.querySelectorAll('.increase-btn').forEach(btn => {
+                btn.disabled = totalItems >= 20;
+            });
         }
 
         function updateQuantity(productId, action) {
@@ -579,10 +720,17 @@ if (isset($_POST['add_to_cart']) && $user_id) {
             const quantityDisplay = cartItem.querySelector('.quantity-display');
             const decreaseBtn = cartItem.querySelector('.decrease-btn');
             const increaseBtn = cartItem.querySelector('.increase-btn');
-            
-            // Disable buttons during update
+            const removeBtn = cartItem.querySelector('.remove-btn');
+            const itemSubtotal = cartItem.querySelector('.item-subtotal');
+            const itemPrice = parseFloat(cartItem.querySelector('.item-price').dataset.price);
+
+            // Store current quantity for potential revert
+            const currentQuantity = parseInt(quantityDisplay.textContent);
+
+            // Disable all buttons during update
             decreaseBtn.disabled = true;
             increaseBtn.disabled = true;
+            if (removeBtn) removeBtn.disabled = true;
 
             const formData = new FormData();
             formData.append('product_id', productId);
@@ -596,23 +744,18 @@ if (isset($_POST['add_to_cart']) && $user_id) {
             .then(data => {
                 if (data.success) {
                     if (data.new_quantity === 0) {
+                        // Remove item from cart
                         cartItem.remove();
                         if (document.querySelectorAll('.cart-item').length === 0) {
                             location.reload();
                         }
                     } else {
+                        // Update quantity display and subtotal only after successful server response
                         quantityDisplay.textContent = data.new_quantity;
+                        const newSubtotal = (itemPrice * data.new_quantity).toFixed(2);
+                        itemSubtotal.textContent = `Rs. ${newSubtotal}`;
                         decreaseBtn.disabled = data.new_quantity <= 1;
                     }
-
-                    // Update total items badge
-                    const badge = document.querySelector('.badge');
-                    badge.textContent = `${data.new_total} Items`;
-
-                    // Update all increase buttons based on new total
-                    document.querySelectorAll('.increase-btn').forEach(btn => {
-                        btn.disabled = data.new_total >= 20;
-                    });
 
                     // Update cart totals
                     updateCartTotals();
@@ -626,61 +769,78 @@ if (isset($_POST['add_to_cart']) && $user_id) {
                 showToast('An error occurred while updating the cart', 'error');
             })
             .finally(() => {
-                // Re-enable buttons
-                decreaseBtn.disabled = false;
+                // Restore button states
+                decreaseBtn.disabled = data.new_quantity <= 1;
                 increaseBtn.disabled = false;
+                if (removeBtn) removeBtn.disabled = false;
             });
         }
 
-        // Add click handlers to all quantity buttons
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.quantity-control').forEach(control => {
-                const cartItem = control.closest('.cart-item');
-                const productId = cartItem.dataset.productId;
-                
-                control.querySelector('.decrease-btn').addEventListener('click', () => {
-                    updateQuantity(productId, 'decrease');
-                });
-                
-                control.querySelector('.increase-btn').addEventListener('click', () => {
-                    updateQuantity(productId, 'increase');
-                });
-            });
-        });
-
-        function removeFromCart(productId) {
-            if (confirm('Are you sure you want to remove this item from your cart?')) {
+        function removeItem(productId) {
+            if (confirm('Are you sure you want to remove this item?')) {
                 const cartItem = document.querySelector(`.cart-item[data-product-id="${productId}"]`);
-                const formData = new FormData();
-                formData.append('remove_product_id', productId);
+                const removeBtn = cartItem.querySelector('.remove-btn');
+                
+                // Disable button and show loading state
+                removeBtn.disabled = true;
+                const originalHTML = removeBtn.innerHTML;
+                removeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-                fetch(window.location.href, {
+                const formData = new FormData();
+                formData.append('product_id', productId);
+                formData.append('action', 'remove');
+
+                fetch('update_cart_quantity.php', {
                     method: 'POST',
                     body: formData
                 })
-                .then(response => {
-                    if (response.ok) {
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Remove item from cart
                         cartItem.remove();
-                        updateCartTotals();
-                        
-                        const badge = document.querySelector('.badge');
-                        const currentTotal = parseInt(badge.textContent);
-                        badge.textContent = `${currentTotal - 1} Items`;
-                        
                         if (document.querySelectorAll('.cart-item').length === 0) {
                             location.reload();
                         }
                         
-                        showToast('Item removed from cart successfully');
+                        // Update cart totals
+                        updateCartTotals();
+
+                        showToast(data.message);
                     } else {
-                        showToast('Failed to remove item from cart', 'error');
+                        showToast(data.message, 'error');
                     }
                 })
                 .catch(error => {
                     showToast('An error occurred while removing the item', 'error');
+                })
+                .finally(() => {
+                    // Restore button state
+                    removeBtn.disabled = false;
+                    removeBtn.innerHTML = originalHTML;
                 });
             }
         }
+
+        function confirmClearCart() {
+            if (confirm('Are you sure you want to clear your cart? This action cannot be undone.')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '';
+                
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'clear_cart';
+                input.value = '1';
+                
+                form.appendChild(input);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        // Call updateCartTotals when the page loads
+        document.addEventListener('DOMContentLoaded', updateCartTotals);
     </script>
 </body>
 

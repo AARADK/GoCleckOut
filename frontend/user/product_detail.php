@@ -300,7 +300,7 @@ if (isset($_SESSION['user_id'])) {
 
           <p class="mb-4"><?= htmlspecialchars($product['DESCRIPTION'] instanceof OCILob ? $product['DESCRIPTION']->load() : $product['DESCRIPTION']) ?></p>
 
-          <form action="cart.php" method="POST" class="mb-4">
+          <form id="addToCartForm" class="mb-4">
             <input type="hidden" name="product_id" value="<?= $product['PRODUCT_ID'] ?>">
             <div class="quantity-selector mb-3">
               <button type="button" class="decrease-btn" onclick="decreaseQuantity()">-</button>
@@ -308,7 +308,7 @@ if (isset($_SESSION['user_id'])) {
               <button type="button" class="increase-btn" onclick="increaseQuantity()">+</button>
             </div>
             <div class="d-grid gap-2">
-              <button type="submit" name="add_to_cart" class="btn btn-primary" <?= $product['STOCK'] <= 0 ? 'disabled' : '' ?>>
+              <button type="submit" class="btn btn-primary" <?= $product['STOCK'] <= 0 ? 'disabled' : '' ?>>
                 <i class="fas fa-shopping-cart me-2"></i>Add to Cart
               </button>
               <button type="button" class="wishlist-btn" onclick="toggleWishlist(this)" data-product-id="<?= $product['PRODUCT_ID'] ?>">
@@ -357,86 +357,116 @@ if (isset($_SESSION['user_id'])) {
   <?php include "../footer.php" ?>
 
   <script>
+    function showToast(message, type = 'success') {
+        Toastify({
+            text: message,
+            duration: 3000,
+            gravity: "top",
+            position: "right",
+            backgroundColor: type === 'success' ? "#4CAF50" : "#f44336",
+        }).showToast();
+    }
+
     function decreaseQuantity() {
-      const input = document.getElementById('quantity');
-      if (input.value > 1) {
-        input.value = parseInt(input.value) - 1;
-      }
+        const input = document.getElementById('quantity');
+        if (input.value > 1) {
+            input.value = parseInt(input.value) - 1;
+        }
     }
 
     function increaseQuantity() {
-      const input = document.getElementById('quantity');
-      if (input.value < <?= $product['STOCK'] ?>) {
-        input.value = parseInt(input.value) + 1;
-      }
+        const input = document.getElementById('quantity');
+        const maxStock = <?= $product['STOCK'] ?>;
+        if (input.value < maxStock) {
+            input.value = parseInt(input.value) + 1;
+        }
     }
 
-    function toggleWishlist(button) {
-      const productId = button.dataset.productId;
-      const icon = button.querySelector('i');
-      const text = button.querySelector('span');
-      
-      // Determine the action based on current state
-      const action = icon.classList.contains('far') ? 'add' : 'remove';
-      
-      // Make API call to update wishlist
-      fetch('/GCO/frontend/user/update_wishlist.php', {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: `product_id=${productId}&action=${action}`
-      })
-      .then(response => response.json())
-      .then(data => {
-          if (data.success) {
-              // Toggle heart icon and text
-              if (action === 'add') {
-                  icon.classList.remove('far');
-                  icon.classList.add('fas');
-                  button.innerHTML = '<i class="fas fa-heart me-2"></i>Remove from Wishlist';
-                  Toastify({
-                      text: "Added to wishlist",
-                      duration: 2000,
-                      close: true,
-                      gravity: 'top',
-                      position: 'right',
-                      backgroundColor: "#198754",
-                  }).showToast();
-              } else {
-                  icon.classList.remove('fas');
-                  icon.classList.add('far');
-                  button.innerHTML = '<i class="far fa-heart me-2"></i>Add to Wishlist';
-                  Toastify({
-                      text: "Removed from wishlist",
-                      duration: 2000,
-                      close: true,
-                      gravity: 'top',
-                      position: 'right',
-                      backgroundColor: "#dc3545",
-                  }).showToast();
-              }
-          } else {
-              Toastify({
-                  text: data.message || "Failed to update wishlist",
-                  duration: 2000,
-                  close: true,
-                  gravity: 'top',
-                  position: 'right',
-                  backgroundColor: "#dc3545",
-              }).showToast();
-          }
-      })
-      .catch(error => {
-          Toastify({
-              text: "An error occurred",
-              duration: 2000,
-              close: true,
-              gravity: 'top',
-              position: 'right',
-              backgroundColor: "#dc3545",
-          }).showToast();
-      });
+    document.getElementById('addToCartForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const form = this;
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const quantity = document.getElementById('quantity').value;
+        const productId = form.querySelector('input[name="product_id"]').value;
+
+        // Disable button and show loading state
+        submitBtn.disabled = true;
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding...';
+
+        try {
+            // First validate the quantity
+            const validateResponse = await fetch('update_cart_quantity.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `product_id=${productId}&action=validate&quantity=${quantity}`
+            });
+            const validateResult = await validateResponse.json();
+
+            if (!validateResult.success) {
+                showToast(validateResult.message, 'error');
+                return;
+            }
+
+            // If validation passes, submit the form
+            const formData = new FormData(form);
+            formData.append('add_to_cart', '1');
+            
+            const response = await fetch('cart.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                showToast('Product added to cart successfully');
+                // Reset quantity to minimum order
+                document.getElementById('quantity').value = <?= $product['MIN_ORDER'] ?>;
+            } else {
+                throw new Error('Failed to add product to cart');
+            }
+        } catch (error) {
+            showToast(error.message || 'Failed to add product to cart', 'error');
+        } finally {
+            // Restore button state
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+    });
+
+    async function toggleWishlist(button) {
+        const productId = button.dataset.productId;
+        const icon = button.querySelector('i');
+        const text = button.querySelector('span') || button;
+
+        try {
+            const response = await fetch('wishlist.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `product_id=${productId}&action=${icon.classList.contains('far') ? 'add' : 'remove'}`
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                if (icon.classList.contains('far')) {
+                    icon.classList.replace('far', 'fas');
+                    text.textContent = 'Remove from Wishlist';
+                } else {
+                    icon.classList.replace('fas', 'far');
+                    text.textContent = 'Add to Wishlist';
+                }
+                showToast(result.message);
+            } else {
+                showToast(result.message, 'error');
+            }
+        } catch (error) {
+            showToast('Failed to update wishlist', 'error');
+        }
     }
   </script>
 </body>

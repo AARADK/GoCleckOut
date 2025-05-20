@@ -107,7 +107,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['name'])) {
                                         <i class="fas fa-user"></i> User
                                     </button>
                                     <div class="dropdown-menu" aria-labelledby="dropdownMenuButton">
-                                        <a class="dropdown-item" href="/GCO/frontend/user/profile.php">Profile</a>
+                                        <a class="dropdown-item" href="/GCO/frontend/User_Profile.php">Profile</a>
                                         <a class="dropdown-item" href="/GCO/frontend/home.php?logged_in=false">Logout</a>
                                     </div>
                                 </div>

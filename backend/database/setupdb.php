@@ -185,8 +185,6 @@ if ($conn) {
             description CLOB,
             price NUMBER NOT NULL,
             stock NUMBER NOT NULL,
-            min_order NUMBER NOT NULL,
-            max_order NUMBER NOT NULL,
             product_image BLOB,
             added_date DATE,
             updated_date DATE,
@@ -223,29 +221,54 @@ if ($conn) {
         )
     ");
 
-    // Add trigger to limit cart items to 20
+    // Replace the trigger with the improved compound trigger
     executeSQL($conn, "
         CREATE OR REPLACE TRIGGER trg_cart_item_limit
-        BEFORE INSERT OR UPDATE ON cart_product
-        FOR EACH ROW
-        DECLARE
-            v_total_items NUMBER;
-        BEGIN
-            -- Calculate total items in cart (including the new/updated item)
-            SELECT NVL(SUM(CASE 
-                WHEN :NEW.cart_id = cart_id AND :NEW.product_id = product_id 
-                THEN :NEW.quantity 
-                ELSE quantity 
-            END), 0)
-            INTO v_total_items
-            FROM cart_product
-            WHERE cart_id = :NEW.cart_id;
+        FOR INSERT OR UPDATE OR DELETE ON cart_product
+        COMPOUND TRIGGER
+            -- Use a nested table to track cart IDs that were modified
+            TYPE cart_id_tab IS TABLE OF cart_product.cart_id%TYPE INDEX BY PLS_INTEGER;
+            modified_cart_ids cart_id_tab;
+            idx INTEGER := 0;
 
-            -- If total items would exceed 20, raise an error
-            IF v_total_items > 20 THEN
-                RAISE_APPLICATION_ERROR(-20001, 'Cart cannot contain more than 20 items total');
-            END IF;
-        END;
+            BEFORE EACH ROW IS
+            BEGIN
+                -- Record the affected cart_id (avoid duplicates later)
+                IF INSERTING OR UPDATING THEN
+                    idx := idx + 1;
+                    modified_cart_ids(idx) := :NEW.cart_id;
+                ELSIF DELETING THEN
+                    idx := idx + 1;
+                    modified_cart_ids(idx) := :OLD.cart_id;
+                END IF;
+            END BEFORE EACH ROW;
+
+            AFTER STATEMENT IS
+                v_cart_id cart_product.cart_id%TYPE;
+                v_total_quantity NUMBER;
+            BEGIN
+                -- Loop through each affected cart_id and check total quantity
+                FOR i IN 1 .. modified_cart_ids.COUNT LOOP
+                    v_cart_id := modified_cart_ids(i);
+
+                    -- Avoid duplicate cart checks
+                    FOR j IN 1 .. i - 1 LOOP
+                        IF modified_cart_ids(j) = v_cart_id THEN
+                            CONTINUE;
+                        END IF;
+                    END LOOP;
+
+                    SELECT NVL(SUM(quantity), 0)
+                    INTO v_total_quantity
+                    FROM cart_product
+                    WHERE cart_id = v_cart_id;
+
+                    IF v_total_quantity > 20 THEN
+                        RAISE_APPLICATION_ERROR(-20001, 'Cart cannot contain more than 20 items total');
+                    END IF;
+                END LOOP;
+            END AFTER STATEMENT;
+        END trg_cart_item_limit;
     ");
 
     // REVIEW TABLE
@@ -313,6 +336,54 @@ if ($conn) {
         BEGIN
             SELECT coupon_seq.NEXTVAL INTO :new.coupon_id FROM dual;
         END;
+    ");
+
+    // Insert active coupons
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('WELCOME20', SYSDATE, ADD_MONTHS(SYSDATE, 3), 'Welcome discount for new customers', 20)
+    ");
+
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('SUMMER15', SYSDATE, ADD_MONTHS(SYSDATE, 2), 'Summer special discount', 15)
+    ");
+
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('BULK25', SYSDATE, ADD_MONTHS(SYSDATE, 6), 'Bulk purchase discount', 25)
+    ");
+
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('FIRST10', SYSDATE, ADD_MONTHS(SYSDATE, 1), 'First order discount', 10)
+    ");
+
+    // Insert expired coupons
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('WINTER10', ADD_MONTHS(SYSDATE, -3), ADD_MONTHS(SYSDATE, -1), 'Winter sale discount', 10)
+    ");
+
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('HOLIDAY30', ADD_MONTHS(SYSDATE, -6), ADD_MONTHS(SYSDATE, -4), 'Holiday season special', 30)
+    ");
+
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('SPRING20', ADD_MONTHS(SYSDATE, -2), ADD_MONTHS(SYSDATE, -1), 'Spring cleaning sale', 20)
+    ");
+
+    // Insert future coupons
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('AUTUMN25', ADD_MONTHS(SYSDATE, 1), ADD_MONTHS(SYSDATE, 3), 'Autumn special discount', 25)
+    ");
+
+    executeSQL($conn, "
+        INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
+        VALUES ('BLACKFRIDAY40', ADD_MONTHS(SYSDATE, 2), ADD_MONTHS(SYSDATE, 2) + 7, 'Black Friday special', 40)
     ");
 
     // ORDERS TABLE
@@ -573,68 +644,68 @@ if ($conn) {
 
     // Products for Gourmet Delights (first shop of trader 2)
     $gourmet_products = [
-        ['name' => 'Prosciutto di Parma', 'desc' => 'Aged Italian dry-cured ham.', 'price' => 24.99, 'stock' => 30, 'min' => 1, 'max' => 3, 'category' => 'delicatessen'],
-        ['name' => 'Truffle Cheese', 'desc' => 'Creamy cheese with black truffle.', 'price' => 18.50, 'stock' => 25, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Olive Tapenade', 'desc' => 'Mediterranean olive spread.', 'price' => 12.99, 'stock' => 40, 'min' => 1, 'max' => 5, 'category' => 'delicatessen'],
-        ['name' => 'Artisanal Salami', 'desc' => 'Handcrafted Italian salami.', 'price' => 15.99, 'stock' => 35, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Balsamic Vinegar', 'desc' => 'Aged balsamic vinegar.', 'price' => 22.99, 'stock' => 20, 'min' => 1, 'max' => 3, 'category' => 'delicatessen'],
-        ['name' => 'Goat Cheese', 'desc' => 'Creamy French goat cheese.', 'price' => 14.99, 'stock' => 30, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Sun-dried Tomatoes', 'desc' => 'Italian sun-dried tomatoes.', 'price' => 9.99, 'stock' => 45, 'min' => 1, 'max' => 6, 'category' => 'delicatessen'],
-        ['name' => 'Pesto Sauce', 'desc' => 'Fresh basil pesto.', 'price' => 11.99, 'stock' => 35, 'min' => 1, 'max' => 5, 'category' => 'delicatessen'],
-        ['name' => 'Cured Olives', 'desc' => 'Mixed Mediterranean olives.', 'price' => 13.99, 'stock' => 40, 'min' => 1, 'max' => 5, 'category' => 'delicatessen'],
-        ['name' => 'Artisanal Mustard', 'desc' => 'Handcrafted Dijon mustard.', 'price' => 8.99, 'stock' => 50, 'min' => 1, 'max' => 6, 'category' => 'delicatessen']
+        ['name' => 'Prosciutto di Parma', 'desc' => 'Aged Italian dry-cured ham.', 'price' => 24.99, 'stock' => 30, 'category' => 'delicatessen'],
+        ['name' => 'Truffle Cheese', 'desc' => 'Creamy cheese with black truffle.', 'price' => 18.50, 'stock' => 25, 'category' => 'delicatessen'],
+        ['name' => 'Olive Tapenade', 'desc' => 'Mediterranean olive spread.', 'price' => 12.99, 'stock' => 40, 'category' => 'delicatessen'],
+        ['name' => 'Artisanal Salami', 'desc' => 'Handcrafted Italian salami.', 'price' => 15.99, 'stock' => 35, 'category' => 'delicatessen'],
+        ['name' => 'Balsamic Vinegar', 'desc' => 'Aged balsamic vinegar.', 'price' => 22.99, 'stock' => 20, 'category' => 'delicatessen'],
+        ['name' => 'Goat Cheese', 'desc' => 'Creamy French goat cheese.', 'price' => 14.99, 'stock' => 30, 'category' => 'delicatessen'],
+        ['name' => 'Sun-dried Tomatoes', 'desc' => 'Italian sun-dried tomatoes.', 'price' => 9.99, 'stock' => 45, 'category' => 'delicatessen'],
+        ['name' => 'Pesto Sauce', 'desc' => 'Fresh basil pesto.', 'price' => 11.99, 'stock' => 35, 'category' => 'delicatessen'],
+        ['name' => 'Cured Olives', 'desc' => 'Mixed Mediterranean olives.', 'price' => 13.99, 'stock' => 40, 'category' => 'delicatessen'],
+        ['name' => 'Artisanal Mustard', 'desc' => 'Handcrafted Dijon mustard.', 'price' => 8.99, 'stock' => 50, 'category' => 'delicatessen']
     ];
 
     // Products for Artisan Foods (second shop of trader 2)
     $artisan_products = [
-        ['name' => 'Smoked Salmon', 'desc' => 'Cold-smoked Norwegian salmon.', 'price' => 19.99, 'stock' => 25, 'min' => 1, 'max' => 3, 'category' => 'delicatessen'],
-        ['name' => 'Aged Cheddar', 'desc' => '24-month aged English cheddar.', 'price' => 16.99, 'stock' => 30, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Marinated Artichokes', 'desc' => 'Italian marinated artichoke hearts.', 'price' => 10.99, 'stock' => 40, 'min' => 1, 'max' => 5, 'category' => 'delicatessen'],
-        ['name' => 'Chorizo', 'desc' => 'Spanish cured chorizo.', 'price' => 14.99, 'stock' => 35, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Truffle Honey', 'desc' => 'Honey infused with black truffle.', 'price' => 21.99, 'stock' => 20, 'min' => 1, 'max' => 3, 'category' => 'delicatessen'],
-        ['name' => 'Blue Cheese', 'desc' => 'French Roquefort blue cheese.', 'price' => 17.99, 'stock' => 25, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Capers', 'desc' => 'Sicilian capers in brine.', 'price' => 7.99, 'stock' => 45, 'min' => 1, 'max' => 6, 'category' => 'delicatessen'],
-        ['name' => 'Anchovy Paste', 'desc' => 'Italian anchovy paste.', 'price' => 9.99, 'stock' => 35, 'min' => 1, 'max' => 5, 'category' => 'delicatessen'],
-        ['name' => 'Dried Porcini', 'desc' => 'Dried Italian porcini mushrooms.', 'price' => 15.99, 'stock' => 30, 'min' => 1, 'max' => 4, 'category' => 'delicatessen'],
-        ['name' => 'Herb Butter', 'desc' => 'Handcrafted herb butter.', 'price' => 8.99, 'stock' => 40, 'min' => 1, 'max' => 5, 'category' => 'delicatessen']
+        ['name' => 'Smoked Salmon', 'desc' => 'Cold-smoked Norwegian salmon.', 'price' => 19.99, 'stock' => 25, 'category' => 'delicatessen'],
+        ['name' => 'Aged Cheddar', 'desc' => '24-month aged English cheddar.', 'price' => 16.99, 'stock' => 30, 'category' => 'delicatessen'],
+        ['name' => 'Marinated Artichokes', 'desc' => 'Italian marinated artichoke hearts.', 'price' => 10.99, 'stock' => 40, 'category' => 'delicatessen'],
+        ['name' => 'Chorizo', 'desc' => 'Spanish cured chorizo.', 'price' => 14.99, 'stock' => 35, 'category' => 'delicatessen'],
+        ['name' => 'Truffle Honey', 'desc' => 'Honey infused with black truffle.', 'price' => 21.99, 'stock' => 20, 'category' => 'delicatessen'],
+        ['name' => 'Blue Cheese', 'desc' => 'French Roquefort blue cheese.', 'price' => 17.99, 'stock' => 25, 'category' => 'delicatessen'],
+        ['name' => 'Capers', 'desc' => 'Sicilian capers in brine.', 'price' => 7.99, 'stock' => 45, 'category' => 'delicatessen'],
+        ['name' => 'Anchovy Paste', 'desc' => 'Italian anchovy paste.', 'price' => 9.99, 'stock' => 35, 'category' => 'delicatessen'],
+        ['name' => 'Dried Porcini', 'desc' => 'Dried Italian porcini mushrooms.', 'price' => 15.99, 'stock' => 30, 'category' => 'delicatessen'],
+        ['name' => 'Herb Butter', 'desc' => 'Handcrafted herb butter.', 'price' => 8.99, 'stock' => 40, 'category' => 'delicatessen']
     ];
 
     // Products for Ocean Fresh (first shop of trader 3)
     $ocean_products = [
-        ['name' => 'Fresh Salmon', 'desc' => 'Wild-caught Atlantic salmon.', 'price' => 22.99, 'stock' => 30, 'min' => 1, 'max' => 3, 'category' => 'fishmonger'],
-        ['name' => 'Sea Bass', 'desc' => 'Fresh Mediterranean sea bass.', 'price' => 19.99, 'stock' => 25, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Tuna Steak', 'desc' => 'Fresh yellowfin tuna steak.', 'price' => 24.99, 'stock' => 20, 'min' => 1, 'max' => 3, 'category' => 'fishmonger'],
-        ['name' => 'Prawns', 'desc' => 'Large tiger prawns.', 'price' => 18.99, 'stock' => 35, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Mussels', 'desc' => 'Fresh black mussels.', 'price' => 12.99, 'stock' => 40, 'min' => 1, 'max' => 5, 'category' => 'fishmonger'],
-        ['name' => 'Cod Fillet', 'desc' => 'Fresh Atlantic cod fillet.', 'price' => 16.99, 'stock' => 30, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Squid', 'desc' => 'Fresh whole squid.', 'price' => 14.99, 'stock' => 25, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Crab', 'desc' => 'Whole blue crab.', 'price' => 21.99, 'stock' => 20, 'min' => 1, 'max' => 3, 'category' => 'fishmonger'],
-        ['name' => 'Oysters', 'desc' => 'Fresh Pacific oysters.', 'price' => 19.99, 'stock' => 35, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Scallops', 'desc' => 'Fresh sea scallops.', 'price' => 23.99, 'stock' => 25, 'min' => 1, 'max' => 3, 'category' => 'fishmonger']
+        ['name' => 'Fresh Salmon', 'desc' => 'Wild-caught Atlantic salmon.', 'price' => 22.99, 'stock' => 30, 'category' => 'fishmonger'],
+        ['name' => 'Sea Bass', 'desc' => 'Fresh Mediterranean sea bass.', 'price' => 19.99, 'stock' => 25, 'category' => 'fishmonger'],
+        ['name' => 'Tuna Steak', 'desc' => 'Fresh yellowfin tuna steak.', 'price' => 24.99, 'stock' => 20, 'category' => 'fishmonger'],
+        ['name' => 'Prawns', 'desc' => 'Large tiger prawns.', 'price' => 18.99, 'stock' => 35, 'category' => 'fishmonger'],
+        ['name' => 'Mussels', 'desc' => 'Fresh black mussels.', 'price' => 12.99, 'stock' => 40, 'category' => 'fishmonger'],
+        ['name' => 'Cod Fillet', 'desc' => 'Fresh Atlantic cod fillet.', 'price' => 16.99, 'stock' => 30, 'category' => 'fishmonger'],
+        ['name' => 'Squid', 'desc' => 'Fresh whole squid.', 'price' => 14.99, 'stock' => 25, 'category' => 'fishmonger'],
+        ['name' => 'Crab', 'desc' => 'Whole blue crab.', 'price' => 21.99, 'stock' => 20, 'category' => 'fishmonger'],
+        ['name' => 'Oysters', 'desc' => 'Fresh Pacific oysters.', 'price' => 19.99, 'stock' => 35, 'category' => 'fishmonger'],
+        ['name' => 'Scallops', 'desc' => 'Fresh sea scallops.', 'price' => 23.99, 'stock' => 25, 'category' => 'fishmonger']
     ];
 
     // Products for Coastal Catch (second shop of trader 3)
     $coastal_products = [
-        ['name' => 'Lobster', 'desc' => 'Live Maine lobster.', 'price' => 29.99, 'stock' => 20, 'min' => 1, 'max' => 2, 'category' => 'fishmonger'],
-        ['name' => 'Halibut', 'desc' => 'Fresh Pacific halibut.', 'price' => 21.99, 'stock' => 25, 'min' => 1, 'max' => 3, 'category' => 'fishmonger'],
-        ['name' => 'Shrimp', 'desc' => 'Wild-caught Gulf shrimp.', 'price' => 17.99, 'stock' => 35, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Clams', 'desc' => 'Fresh littleneck clams.', 'price' => 13.99, 'stock' => 40, 'min' => 1, 'max' => 5, 'category' => 'fishmonger'],
-        ['name' => 'Swordfish', 'desc' => 'Fresh swordfish steak.', 'price' => 23.99, 'stock' => 20, 'min' => 1, 'max' => 3, 'category' => 'fishmonger'],
-        ['name' => 'Octopus', 'desc' => 'Fresh Mediterranean octopus.', 'price' => 19.99, 'stock' => 25, 'min' => 1, 'max' => 3, 'category' => 'fishmonger'],
-        ['name' => 'Sea Urchin', 'desc' => 'Fresh uni (sea urchin).', 'price' => 25.99, 'stock' => 15, 'min' => 1, 'max' => 2, 'category' => 'fishmonger'],
-        ['name' => 'Mackerel', 'desc' => 'Fresh Atlantic mackerel.', 'price' => 15.99, 'stock' => 30, 'min' => 1, 'max' => 4, 'category' => 'fishmonger'],
-        ['name' => 'Anchovies', 'desc' => 'Fresh Spanish anchovies.', 'price' => 12.99, 'stock' => 35, 'min' => 1, 'max' => 5, 'category' => 'fishmonger'],
-        ['name' => 'Sea Trout', 'desc' => 'Fresh sea trout fillet.', 'price' => 18.99, 'stock' => 25, 'min' => 1, 'max' => 3, 'category' => 'fishmonger']
+        ['name' => 'Lobster', 'desc' => 'Live Maine lobster.', 'price' => 29.99, 'stock' => 20, 'category' => 'fishmonger'],
+        ['name' => 'Halibut', 'desc' => 'Fresh Pacific halibut.', 'price' => 21.99, 'stock' => 25, 'category' => 'fishmonger'],
+        ['name' => 'Shrimp', 'desc' => 'Wild-caught Gulf shrimp.', 'price' => 17.99, 'stock' => 35, 'category' => 'fishmonger'],
+        ['name' => 'Clams', 'desc' => 'Fresh littleneck clams.', 'price' => 13.99, 'stock' => 40, 'category' => 'fishmonger'],
+        ['name' => 'Swordfish', 'desc' => 'Fresh swordfish steak.', 'price' => 23.99, 'stock' => 20, 'category' => 'fishmonger'],
+        ['name' => 'Octopus', 'desc' => 'Fresh Mediterranean octopus.', 'price' => 19.99, 'stock' => 25, 'category' => 'fishmonger'],
+        ['name' => 'Sea Urchin', 'desc' => 'Fresh uni (sea urchin).', 'price' => 25.99, 'stock' => 15, 'category' => 'fishmonger'],
+        ['name' => 'Mackerel', 'desc' => 'Fresh Atlantic mackerel.', 'price' => 15.99, 'stock' => 30, 'category' => 'fishmonger'],
+        ['name' => 'Anchovies', 'desc' => 'Fresh Spanish anchovies.', 'price' => 12.99, 'stock' => 35, 'category' => 'fishmonger'],
+        ['name' => 'Sea Trout', 'desc' => 'Fresh sea trout fillet.', 'price' => 18.99, 'stock' => 25, 'category' => 'fishmonger']
     ];
 
     // Function to insert products for a shop
     function insertProducts($conn, $products, $shop_id, $user_id) {
         $product_sql = "INSERT INTO product (
-            product_name, description, price, stock, min_order, max_order, 
+            product_name, description, price, stock, 
             product_image, added_date, updated_date, product_status, 
             discount_percentage, shop_id, user_id, product_category_name
         ) VALUES (
-            :name, :product_desc, :price, :stock, :min_order, :max_order,
+            :name, :product_desc, :price, :stock,
             :product_image, SYSDATE, SYSDATE, 'active', 0, :shop_id, :user_id, :category
         )";
 
@@ -645,8 +716,6 @@ if ($conn) {
             oci_bind_by_name($stmt, ':product_desc', $product['desc']);
             oci_bind_by_name($stmt, ':price', $product['price']);
             oci_bind_by_name($stmt, ':stock', $product['stock']);
-            oci_bind_by_name($stmt, ':min_order', $product['min']);
-            oci_bind_by_name($stmt, ':max_order', $product['max']);
             oci_bind_by_name($stmt, ':category', $product['category']);
             oci_bind_by_name($stmt, ':shop_id', $shop_id);
             oci_bind_by_name($stmt, ':user_id', $user_id);
@@ -698,9 +767,6 @@ if ($conn) {
 
     // Insert into collection_slot
     executeSQL($conn, "INSERT INTO collection_slot (collection_slot_id, slot_date, slot_day, slot_time, total_order) VALUES (1, TO_DATE('2024-01-16', 'YYYY-MM-DD'), 'Monday', TO_TIMESTAMP('2024-01-16 10:00:00', 'YYYY-MM-DD HH24:MI:SS'), 1)");
-
-    // Insert into coupon
-    executeSQL($conn, "INSERT INTO coupon (coupon_id, coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent) VALUES (1, 'WINTER10', TO_DATE('2024-01-01', 'YYYY-MM-DD'), TO_DATE('2024-02-01', 'YYYY-MM-DD'), 'Winter Sale', 10)");
 
     // Insert into report
     executeSQL($conn, "INSERT INTO report (report_id, user_id, report_description, report_date) VALUES (1, 1, 'Issue with checkout', SYSDATE)");
