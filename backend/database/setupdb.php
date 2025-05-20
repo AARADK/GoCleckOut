@@ -80,6 +80,12 @@ executeSQLNoWarnings($conn, "DROP TRIGGER trg_coupon_pk");
 executeSQLNoWarnings($conn, "DROP SEQUENCE coupon_seq");
 executeSQLNoWarnings($conn, "DROP TABLE coupon CASCADE CONSTRAINTS");
 
+// Drop order_products related objects
+executeSQLNoWarnings($conn, "DROP TABLE order_products CASCADE CONSTRAINTS");
+executeSQLNoWarnings($conn, "DROP SEQUENCE order_products_seq");
+executeSQLNoWarnings($conn, "DROP TRIGGER trg_order_products_pk");
+executeSQLNoWarnings($conn, "DROP TRIGGER trg_populate_order_products");
+
 // Reorder the table creation sequence
 if ($conn) {
 
@@ -418,24 +424,96 @@ if ($conn) {
     executeSQL($conn, "
         CREATE TABLE payment (
             payment_id NUMBER PRIMARY KEY,
-            payment_date DATE,
-            amount NUMBER,
-            payment_method VARCHAR2(50),
-            payment_status VARCHAR2(20),
-            order_id NUMBER NOT NULL,
+            timeslot_id NUMBER,
+            cart_id NUMBER,
             user_id NUMBER NOT NULL,
+            amount NUMBER NOT NULL,
+            payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status VARCHAR2(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
+            payment_method VARCHAR2(50),
+            transaction_id VARCHAR2(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CONSTRAINT fk_payment_user FOREIGN KEY (user_id) REFERENCES users(user_id),
-            CONSTRAINT fk_payment_order FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            CONSTRAINT fk_payment_timeslot_cart FOREIGN KEY (timeslot_id, cart_id) REFERENCES timeslot_cart(timeslot_id, cart_id)
         )
     ");
 
     executeSQL($conn, "CREATE SEQUENCE payment_seq START WITH 1 INCREMENT BY 1");
+
+    // Create new payment trigger
     executeSQL($conn, "
         CREATE OR REPLACE TRIGGER trg_payment_pk
         BEFORE INSERT ON payment
         FOR EACH ROW
         BEGIN
             SELECT payment_seq.NEXTVAL INTO :new.payment_id FROM dual;
+        END;
+    ");
+
+    // Create order_products table
+    executeSQL($conn, "
+        CREATE TABLE order_products (
+            order_product_id NUMBER PRIMARY KEY,
+            payment_id NUMBER NOT NULL,
+            product_id NUMBER NOT NULL,
+            product_name VARCHAR2(255) NOT NULL,
+            quantity NUMBER NOT NULL,
+            unit_price NUMBER(10,2) NOT NULL,
+            total_price NUMBER(10,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT fk_order_products_payment FOREIGN KEY (payment_id) REFERENCES payment(payment_id) ON DELETE CASCADE,
+            CONSTRAINT fk_order_products_product FOREIGN KEY (product_id) REFERENCES product(product_id) ON DELETE CASCADE
+        )
+    ");
+
+    executeSQL($conn, "CREATE SEQUENCE order_products_seq START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE");
+
+    executeSQL($conn, "
+        CREATE OR REPLACE TRIGGER trg_order_products_pk
+        BEFORE INSERT ON order_products
+        FOR EACH ROW
+        BEGIN
+            SELECT order_products_seq.NEXTVAL INTO :NEW.order_product_id FROM dual;
+        END;
+    ");
+
+    // Create trigger to populate order_products when payment is made
+    executeSQL($conn, "
+        CREATE OR REPLACE TRIGGER trg_populate_order_products
+        AFTER INSERT ON payment
+        FOR EACH ROW
+        DECLARE
+            v_cart_id NUMBER;
+        BEGIN
+            -- Get the cart_id from timeslot_cart using timeslot_id and cart_id from payment
+            SELECT cart_id INTO v_cart_id
+            FROM timeslot_cart
+            WHERE timeslot_id = :NEW.timeslot_id
+            AND cart_id = :NEW.cart_id;
+
+            -- Insert products from cart into order_products
+            INSERT INTO order_products (
+                payment_id,
+                product_id,
+                product_name,
+                quantity,
+                unit_price,
+                total_price
+            )
+            SELECT 
+                :NEW.payment_id,
+                p.product_id,
+                p.product_name,
+                cp.quantity,
+                p.price,
+                p.price * cp.quantity
+            FROM cart_product cp
+            JOIN product p ON cp.product_id = p.product_id
+            WHERE cp.cart_id = v_cart_id;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                -- Handle case where timeslot_cart entry is not found
+                NULL;
         END;
     ");
 
@@ -744,35 +822,6 @@ if ($conn) {
     insertProducts($conn, $artisan_products, $shop_ids[1], 4); // Artisan Foods
     insertProducts($conn, $ocean_products, $shop_ids[2], 5);   // Ocean Fresh
     insertProducts($conn, $coastal_products, $shop_ids[3], 5); // Coastal Catch
-
-    // Insert into cart
-    executeSQL($conn, "INSERT INTO cart (cart_id, user_id) VALUES (1, 1)");
-
-    // Insert into cart_product
-    executeSQL($conn, "INSERT INTO cart_product (cart_id, product_id, quantity) VALUES (1, 1, 1)");
-    executeSQL($conn, "INSERT INTO cart_product (cart_id, product_id, quantity) VALUES (1, 2, 2)");
-
-    // Insert into wishlist
-    executeSQL($conn, "INSERT INTO wishlist (wishlist_id, no_of_items, user_id) VALUES (1, 1, 1)");
-    executeSQL($conn, "INSERT INTO wishlist_product (wishlist_id, product_id, added_date) VALUES (1, 2, SYSDATE)");
-    // Insert into reviews
-    executeSQL($conn, "INSERT INTO reviews (review_id, user_id, product_id, review_rating, review_description, review_date) VALUES (1, 1, 1, 5, 'Great product!', SYSDATE)");
-    executeSQL($conn, "INSERT INTO reviews (review_id, user_id, product_id, review_rating, review_description, review_date) VALUES (2, 1, 2, 4, 'Interesting read', SYSDATE)");
-
-    // Insert into orders
-    executeSQL($conn, "INSERT INTO orders (order_id, user_id, cart_id, order_date, total_item_count, total_amount, order_status) VALUES (1, 1, 1, TO_TIMESTAMP('2024-01-15', 'YYYY-MM-DD'), 2, 1240, 'Completed')");
-
-    // Insert into payment
-    executeSQL($conn, "INSERT INTO payment (payment_id, order_id, user_id, amount, payment_method, payment_status, payment_date) VALUES (1, 1, 1, 1240, 'Credit Card', 'Completed', SYSDATE)");
-
-    // Insert into collection_slot
-    executeSQL($conn, "INSERT INTO collection_slot (collection_slot_id, slot_date, slot_day, slot_time, total_order) VALUES (1, TO_DATE('2024-01-16', 'YYYY-MM-DD'), 'Monday', TO_TIMESTAMP('2024-01-16 10:00:00', 'YYYY-MM-DD HH24:MI:SS'), 1)");
-
-    // Insert into report
-    executeSQL($conn, "INSERT INTO report (report_id, user_id, report_description, report_date) VALUES (1, 1, 'Issue with checkout', SYSDATE)");
-
-    // Insert into product_report
-    executeSQL($conn, "INSERT INTO product_report (product_id, report_id) VALUES (2, 1)");
 
     oci_close($conn);
 } else {

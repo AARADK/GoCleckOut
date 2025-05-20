@@ -1,8 +1,8 @@
 <?php
 session_start();
-require_once '../../backend/database/connect.php';
+require_once __DIR__ . '/../../backend/database/connect.php';
 
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['selected_timeslot'])) {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['selected_timeslot_id']) || !isset($_SESSION['selected_cart_id'])) {
     header('Location: cart.php');
     exit;
 }
@@ -12,108 +12,109 @@ if (!$conn) {
     die("Database connection failed");
 }
 
-// Start transaction
-oci_execute(oci_parse($conn, "BEGIN"));
-
 try {
+    oci_execute(oci_parse($conn, "ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'"));
+    
+    // Start transaction
+    oci_execute(oci_parse($conn, "BEGIN"));
+    
     $user_id = $_SESSION['user_id'];
-    $timeslot = $_SESSION['selected_timeslot'];
-    $cart_id = null;
-    $order_id = null;
-
-    // Get cart ID
-    $cart_sql = "SELECT cart_id FROM cart WHERE user_id = :user_id";
-    $cart_stmt = oci_parse($conn, $cart_sql);
-    oci_bind_by_name($cart_stmt, ":user_id", $user_id);
-    oci_execute($cart_stmt);
-    $cart_row = oci_fetch_array($cart_stmt, OCI_ASSOC);
-    oci_free_statement($cart_stmt);
-
-    if (!$cart_row) {
-        throw new Exception("Cart not found");
-    }
-    $cart_id = $cart_row['CART_ID'];
-
-    // Create order
-    $order_sql = "
-        INSERT INTO orders (user_id, order_date, delivery_timeslot, status, total_amount)
-        VALUES (:user_id, SYSDATE, TO_TIMESTAMP(:timeslot, 'YYYY-MM-DD HH24:MI:SS'), 'pending', 
-            (SELECT SUM(cp.quantity * p.price) 
-             FROM cart_product cp 
-             JOIN product p ON cp.product_id = p.product_id 
-             WHERE cp.cart_id = :cart_id))
-        RETURNING order_id INTO :order_id
-    ";
-    $order_stmt = oci_parse($conn, $order_sql);
-    oci_bind_by_name($order_stmt, ":user_id", $user_id);
-    oci_bind_by_name($order_stmt, ":timeslot", $timeslot);
-    oci_bind_by_name($order_stmt, ":cart_id", $cart_id);
-    oci_bind_by_name($order_stmt, ":order_id", $order_id, -1, SQLT_INT);
-    oci_execute($order_stmt);
-    oci_free_statement($order_stmt);
-
-    // Move items from cart to order_items
-    $move_items_sql = "
-        INSERT INTO order_items (order_id, product_id, quantity, price)
-        SELECT :order_id, cp.product_id, cp.quantity, p.price
+    $timeslot_id = $_SESSION['selected_timeslot_id'];
+    $cart_id = $_SESSION['selected_cart_id'];
+    
+    // Get cart total
+    $cart_sql = "
+        SELECT SUM(cp.quantity * p.price) as total_amount
         FROM cart_product cp
         JOIN product p ON cp.product_id = p.product_id
         WHERE cp.cart_id = :cart_id
     ";
-    $move_stmt = oci_parse($conn, $move_items_sql);
-    oci_bind_by_name($move_stmt, ":order_id", $order_id);
-    oci_bind_by_name($move_stmt, ":cart_id", $cart_id);
-    oci_execute($move_stmt);
-    oci_free_statement($move_stmt);
-
+    $cart_stmt = oci_parse($conn, $cart_sql);
+    oci_bind_by_name($cart_stmt, ":cart_id", $cart_id);
+    oci_execute($cart_stmt);
+    $cart_total = oci_fetch_array($cart_stmt, OCI_ASSOC)['TOTAL_AMOUNT'];
+    oci_free_statement($cart_stmt);
+    
+    // Create payment record
+    $payment_sql = "
+        INSERT INTO payment (
+            payment_id, user_id, amount, payment_date, 
+            payment_method, status, transaction_id
+        ) VALUES (
+            payment_seq.NEXTVAL, :user_id, :amount, SYSDATE,
+            'paypal', 'completed', :transaction_id
+        ) RETURNING payment_id INTO :payment_id
+    ";
+    $payment_stmt = oci_parse($conn, $payment_sql);
+    $transaction_id = $_GET['tx'] ?? 'PAYPAL-' . uniqid();
+    oci_bind_by_name($payment_stmt, ":user_id", $user_id);
+    oci_bind_by_name($payment_stmt, ":amount", $cart_total);
+    oci_bind_by_name($payment_stmt, ":transaction_id", $transaction_id);
+    oci_bind_by_name($payment_stmt, ":payment_id", $payment_id, 32);
+    oci_execute($payment_stmt);
+    oci_free_statement($payment_stmt);
+    
+    // Update timeslot_cart status to confirmed
+    $update_sql = "
+        UPDATE timeslot_cart 
+        SET status = 'confirmed', payment_id = :payment_id
+        WHERE timeslot_id = :timeslot_id 
+        AND cart_id = :cart_id 
+        AND status = 'reserved'
+    ";
+    $update_stmt = oci_parse($conn, $update_sql);
+    oci_bind_by_name($update_stmt, ":payment_id", $payment_id);
+    oci_bind_by_name($update_stmt, ":timeslot_id", $timeslot_id);
+    oci_bind_by_name($update_stmt, ":cart_id", $cart_id);
+    oci_execute($update_stmt);
+    oci_free_statement($update_stmt);
+    
     // Update product stock
-    $update_stock_sql = "
+    $stock_sql = "
         UPDATE product p
         SET stock = stock - (
-            SELECT cp.quantity 
+            SELECT quantity 
             FROM cart_product cp 
             WHERE cp.product_id = p.product_id 
             AND cp.cart_id = :cart_id
         )
-        WHERE EXISTS (
-            SELECT 1 
-            FROM cart_product cp 
-            WHERE cp.product_id = p.product_id 
-            AND cp.cart_id = :cart_id
+        WHERE product_id IN (
+            SELECT product_id 
+            FROM cart_product 
+            WHERE cart_id = :cart_id
         )
     ";
-    $stock_stmt = oci_parse($conn, $update_stock_sql);
+    $stock_stmt = oci_parse($conn, $stock_sql);
     oci_bind_by_name($stock_stmt, ":cart_id", $cart_id);
     oci_execute($stock_stmt);
     oci_free_statement($stock_stmt);
-
-    // Clear cart
-    $clear_cart_sql = "DELETE FROM cart_product WHERE cart_id = :cart_id";
-    $clear_stmt = oci_parse($conn, $clear_cart_sql);
+    
+    // Clear the cart
+    $clear_sql = "DELETE FROM cart_product WHERE cart_id = :cart_id";
+    $clear_stmt = oci_parse($conn, $clear_sql);
     oci_bind_by_name($clear_stmt, ":cart_id", $cart_id);
     oci_execute($clear_stmt);
     oci_free_statement($clear_stmt);
-
+    
     // Commit transaction
     oci_execute(oci_parse($conn, "COMMIT"));
-
+    
     // Clear session variables
-    unset($_SESSION['selected_timeslot']);
-    if (isset($_SESSION['applied_coupon'])) {
-        unset($_SESSION['applied_coupon']);
-    }
-
-    $_SESSION['toast_message'] = "Order placed successfully! Your order ID is: " . $order_id;
+    unset($_SESSION['selected_timeslot_id']);
+    unset($_SESSION['selected_cart_id']);
+    
+    $_SESSION['toast_message'] = "Payment successful! Your order has been confirmed.";
     $_SESSION['toast_type'] = "success";
-    header('Location: orders.php');
-    exit;
-
+    header("Location: orders.php");
+    exit();
+    
 } catch (Exception $e) {
-    // Rollback transaction on error
+    // Rollback transaction
     oci_execute(oci_parse($conn, "ROLLBACK"));
-    $_SESSION['toast_message'] = "Error processing order: " . $e->getMessage();
+    
+    $_SESSION['toast_message'] = "Error processing payment: " . $e->getMessage();
     $_SESSION['toast_type'] = "error";
-    header('Location: cart.php');
-    exit;
+    header("Location: cart.php");
+    exit();
 }
 ?> 
