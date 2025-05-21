@@ -335,9 +335,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_to_cart'])) {
             <p class="hero-subtitle">Discover fresh and quality products from your local sellers</p>
             <a href="user/product_page.php" class="btn-explore">Explore</a>
         </div>
+        <section class="py-5 bg-white">
     </div>
     <div class="container-main">
-        <div class="popup-cart"></div>
+            <div class="container">
+                <h2 class="text-center fw-bold mb-4">Featured Categories</h2>
+                <div class="row text-center g-4">
+                    <div class="col">
+                        <div class="d-flex flex-column align-items-center">
+                            <div class="shop-icon" onclick="location.href='user/product_page.php?category=greengrocer'" style="cursor: hand">
+                                <i class="fas fa-apple-alt category-icon"></i>
+                            </div>
+                            <span class="fw-medium">Greengrocer</span>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="d-flex flex-column align-items-center">
+                            <div class="shop-icon" onclick="location.href='user/product_page.php?category=fishmonger'" style="cursor: hand">
+                                <i class="fas fa-fish category-icon"></i>
+                            </div>
+                            <span class="fw-medium">FishMonger</span>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="d-flex flex-column align-items-center">
+                            <div class="shop-icon" onclick="location.href='user/product_page.php?category=delicatessen'" style="cursor: hand">
+                                <i class="fas fa-cheese category-icon"></i>
+                            </div>
+                            <span class="fw-medium">Delicatessen</span>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="d-flex flex-column align-items-center">
+                            <div class="shop-icon" onclick="location.href='user/product_page.php?category=bakery'" style="cursor: hand">
+                                <i class="fas fa-cookie category-icon"></i>
+                            </div>
+                            <span class="fw-medium">Bakery</span>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="d-flex flex-column align-items-center">
+                            <div class="shop-icon" onclick="location.href='user/product_page.php?category=butcher'" style="cursor: hand">
+                                <i class="fas fa-drumstick-bite category-icon"></i>
+                            </div>
+                            <span class="fw-medium">Butcher</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
         <?php include 'user/product_list.php' ?>
     </div>
     <?php include "footer.php" ?>

@@ -6,7 +6,6 @@ if (isset($_SESSION['selected_timeslot_id']) && isset($_SESSION['selected_cart_i
     try {
         $conn = getConnection();
         
-        // Release the timeslot reservation
         $release_sql = "
             DELETE FROM timeslot_cart 
             WHERE timeslot_id = :timeslot_id 
@@ -19,12 +18,10 @@ if (isset($_SESSION['selected_timeslot_id']) && isset($_SESSION['selected_cart_i
         oci_execute($release_stmt);
         oci_free_statement($release_stmt);
     } catch (Exception $e) {
-        // Log error but continue with session cleanup
         error_log("Error releasing timeslot reservation: " . $e->getMessage());
     }
 }
 
-// Clear session variables
 unset($_SESSION['selected_timeslot_id']);
 unset($_SESSION['selected_cart_id']);
 

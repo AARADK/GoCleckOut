@@ -1,63 +1,130 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) session_start();
 
-// Check if product ID is provided
-if (!isset($_GET['id'])) {
-    header("Location: /GCO/frontend/home.php");
-    exit;
+// Initialize variables
+$rfid = '';
+$product_id = '';
+
+// Check for RFID parameter
+if (isset($_GET['rfid'])) {
+    $rfid = htmlspecialchars($_GET['rfid']);
 }
+
+// Get product ID
+$product_id = $_GET['id'] ?? '';
 
 include '../../backend/database/connect.php';
 $conn = getDBConnection();
 
-// Get product details
-$product_id = $_GET['id'];
+// Get product details based on either ID or RFID
 $product_sql = "
     SELECT p.* 
     FROM product p 
-    WHERE p.product_id = :product_id";
-$stmt = oci_parse($conn, $product_sql);
-oci_bind_by_name($stmt, ":product_id", $product_id);
-oci_execute($stmt);
-$product = oci_fetch_array($stmt, OCI_ASSOC);
-oci_free_statement($stmt);
+    WHERE ";
+$params = array();
 
-// If product not found, redirect to home
+if (!empty($rfid)) {
+    $product_sql .= "p.rfid = :rfid";
+    $params[':rfid'] = $rfid;
+} elseif (is_numeric($product_id)) {
+    $product_sql .= "p.product_id = :product_id";
+    $params[':product_id'] = $product_id;
+} else {
+    $product = null;
+}
+
+if (!empty($params)) {
+    $stmt = oci_parse($conn, $product_sql);
+    foreach ($params as $key => $value) {
+        oci_bind_by_name($stmt, $key, $value);
+    }
+    oci_execute($stmt);
+    $product = oci_fetch_array($stmt, OCI_ASSOC);
+    oci_free_statement($stmt);
+}
+
+// If product not found, use dummy data
 if (!$product) {
-    header("Location: /GCO/frontend/home.php");
-    exit;
+    $product = [
+        'PRODUCT_ID' => $product_id ?: 'DUMMY001',
+        'PRODUCT_NAME' => 'Sample Product',
+        'PRICE' => 999.99,
+        'STOCK' => 10,
+        'PRODUCT_CATEGORY_NAME' => 'General',
+        'DESCRIPTION' => 'This is a sample product description.',
+        'MIN_ORDER' => 1,
+        'PRODUCT_IMAGE' => null,
+        'IS_DUMMY' => true
+    ];
+} else {
+    $product['IS_DUMMY'] = false;
+}
+
+// Get wishlist status if user is logged in
+$in_wishlist = false;
+$wishlist_items = [];
+if (isset($_SESSION['user_id'])) {
+    // Get all wishlist items for the user
+    $wishlist_sql = "
+        SELECT wp.product_id 
+        FROM wishlist_product wp 
+        JOIN wishlist w ON wp.wishlist_id = w.wishlist_id 
+        WHERE w.user_id = :user_id
+    ";
+    $stmt = oci_parse($conn, $wishlist_sql);
+    oci_bind_by_name($stmt, ":user_id", $_SESSION['user_id']);
+    oci_execute($stmt);
+    while ($row = oci_fetch_array($stmt, OCI_ASSOC)) {
+        $wishlist_items[] = $row['PRODUCT_ID'];
+    }
+    oci_free_statement($stmt);
+
+    // Check if current product is in wishlist
+    if (!$product['IS_DUMMY']) {
+        $in_wishlist = in_array($product['PRODUCT_ID'], $wishlist_items);
+    }
 }
 
 // Get similar products (same category, excluding current product)
 $similar_sql = "
-    SELECT * FROM product 
-    WHERE product_category_name = :category_name 
-    AND product_id != :product_id 
+    SELECT p.*, s.shop_name 
+    FROM product p 
+    JOIN shops s ON p.shop_id = s.shop_id 
+    WHERE p.product_category_name = :category_name 
+    AND p.product_id != :product_id 
+    AND p.product_status = 'active'
     AND ROWNUM <= 4";
 $stmt = oci_parse($conn, $similar_sql);
 oci_bind_by_name($stmt, ":category_name", $product['PRODUCT_CATEGORY_NAME']);
-oci_bind_by_name($stmt, ":product_id", $product_id);
+oci_bind_by_name($stmt, ":product_id", $product['PRODUCT_ID']);
 oci_execute($stmt);
 $similar_products = [];
 while ($row = oci_fetch_array($stmt, OCI_ASSOC)) {
+    $row['IS_DUMMY'] = false; // Set IS_DUMMY flag for real products
     $similar_products[] = $row;
 }
 oci_free_statement($stmt);
 
-// Get wishlist status if user is logged in
-$in_wishlist = false;
-if (isset($_SESSION['user_id'])) {
-    $wishlist_sql = "
-        SELECT 1 
-        FROM wishlist_product wp 
-        JOIN wishlist w ON wp.wishlist_id = w.wishlist_id 
-        WHERE w.user_id = :user_id AND wp.product_id = :product_id";
-    $stmt = oci_parse($conn, $wishlist_sql);
-    oci_bind_by_name($stmt, ":user_id", $_SESSION['user_id']);
-    oci_bind_by_name($stmt, ":product_id", $product_id);
-    oci_execute($stmt);
-    $in_wishlist = (oci_fetch_array($stmt, OCI_ASSOC) !== false);
-    oci_free_statement($stmt);
+// If no similar products found, use dummy data
+if (empty($similar_products)) {
+    $similar_products = [
+        [
+            'PRODUCT_ID' => 'SIM001',
+            'PRODUCT_NAME' => 'Similar Product 1',
+            'PRICE' => 899.99,
+            'PRODUCT_IMAGE' => null,
+            'IS_DUMMY' => true,
+            'SHOP_NAME' => 'Sample Shop'
+        ],
+        [
+            'PRODUCT_ID' => 'SIM002',
+            'PRODUCT_NAME' => 'Similar Product 2',
+            'PRICE' => 799.99,
+            'PRODUCT_IMAGE' => null,
+            'IS_DUMMY' => true,
+            'SHOP_NAME' => 'Sample Shop'
+        ]
+    ];
 }
 ?>
 <!DOCTYPE html>
@@ -252,6 +319,37 @@ if (isset($_SESSION['user_id'])) {
       align-items: center;
       justify-content: center;
     }
+
+    .card-img-container {
+        position: relative;
+    }
+    .wishlist-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(255, 255, 255, 0.9);
+        border: none;
+        border-radius: 50%;
+        width: 35px;
+        height: 35px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        z-index: 1;
+    }
+    .wishlist-btn:hover {
+        background: white;
+        transform: scale(1.1);
+    }
+    .wishlist-btn i {
+        color: #dc3545;
+        font-size: 1.1rem;
+    }
+    .wishlist-btn.active i {
+        color: #dc3545;
+    }
   </style>
 </head>
 
@@ -300,18 +398,18 @@ if (isset($_SESSION['user_id'])) {
 
           <p class="mb-4"><?= htmlspecialchars($product['DESCRIPTION'] instanceof OCILob ? $product['DESCRIPTION']->load() : $product['DESCRIPTION']) ?></p>
 
-          <form id="addToCartForm" class="mb-4">
+          <form id="addToCartForm" class="mb-4" action="cart.php" method="POST">
             <input type="hidden" name="product_id" value="<?= $product['PRODUCT_ID'] ?>">
             <div class="quantity-selector mb-3">
-              <button type="button" class="decrease-btn" onclick="decreaseQuantity()">-</button>
-              <input type="number" name="quantity" id="quantity" value="1" min="1" max="<?= $product['STOCK'] ?>" class="form-control" style="width: 70px;">
-              <button type="button" class="increase-btn" onclick="increaseQuantity()">+</button>
+              <button type="button" class="btn btn-outline-secondary" onclick="decreaseQuantity()" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>-</button>
+              <input type="number" name="quantity" id="quantity" value="1" min="1" max="<?= $product['STOCK'] ?>" class="form-control" style="width: 70px;" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>
+              <button type="button" class="btn btn-outline-secondary" onclick="increaseQuantity()" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>+</button>
             </div>
             <div class="d-grid gap-2">
-              <button type="submit" class="btn btn-primary" <?= $product['STOCK'] <= 0 ? 'disabled' : '' ?>>
+              <button type="button" onclick="addToCart(<?= $product['PRODUCT_ID'] ?>)" class="btn btn-primary" <?= ($product['STOCK'] <= 0 || $product['IS_DUMMY']) ? 'disabled' : '' ?>>
                 <i class="fas fa-shopping-cart me-2"></i>Add to Cart
               </button>
-              <button type="button" class="wishlist-btn" onclick="toggleWishlist(this)" data-product-id="<?= $product['PRODUCT_ID'] ?>">
+              <button type="button" class="wishlist-btn" onclick="toggleWishlist(this)" data-product-id="<?= $product['PRODUCT_ID'] ?>" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>
                 <i class="<?= $in_wishlist ? 'fas' : 'far' ?> fa-heart me-2"></i>
                 <?= $in_wishlist ? 'Remove from Wishlist' : 'Add to Wishlist' ?>
               </button>
@@ -320,6 +418,9 @@ if (isset($_SESSION['user_id'])) {
 
           <div class="product-meta">
             <small class="text-muted">Available Stock: <?= $product['STOCK'] ?></small>
+            <?php if ($product['IS_DUMMY']): ?>
+              <br><small class="text-muted">(Sample Product - Not Available for Purchase)</small>
+            <?php endif; ?>
           </div>
         </div>
       </div>
@@ -332,19 +433,48 @@ if (isset($_SESSION['user_id'])) {
       <div class="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-4">
         <?php foreach ($similar_products as $similar): ?>
           <div class="col">
-            <div class="card h-100">
-              <?php
-              $similar_img_src = '';
-              if ($similar['PRODUCT_IMAGE'] instanceof OCILob) {
-                  $similar_img_data = $similar['PRODUCT_IMAGE']->load();
-                  $similar_img_src = "data:image/jpeg;base64," . base64_encode($similar_img_data);
-              }
-              ?>
-              <img src="<?= $similar_img_src ?>" class="card-img-top" alt="<?= htmlspecialchars($similar['PRODUCT_NAME']) ?>" style="height: 200px; object-fit: cover;">
-              <div class="card-body">
-                <h5 class="card-title"><?= htmlspecialchars($similar['PRODUCT_NAME']) ?></h5>
-                <p class="card-text text-danger">Rs. <?= number_format($similar['PRICE'], 2) ?></p>
-                <a href="?id=<?= $similar['PRODUCT_ID'] ?>" class="btn btn-primary">View Details</a>
+            <div class="card h-100 shadow-sm">
+              <div class="card-img-container">
+                <?php
+                $similar_img_src = '';
+                if ($similar['PRODUCT_IMAGE'] instanceof OCILob) {
+                    $similar_img_data = $similar['PRODUCT_IMAGE']->load();
+                    $similar_img_src = "data:image/jpeg;base64," . base64_encode($similar_img_data);
+                }
+                if (!empty($similar_img_src)) {
+                    echo "<img src=\"$similar_img_src\" class=\"card-img-top\" style=\"height: 200px; object-fit: cover;\" alt=\"" . htmlspecialchars($similar['PRODUCT_NAME']) . "\">";
+                } else {
+                    echo "<div class=\"card-img-top bg-light d-flex align-items-center justify-content-center\" style=\"height: 200px;\">No Image</div>";
+                }
+                ?>
+                <?php if (!isset($similar['IS_DUMMY']) || !$similar['IS_DUMMY']): ?>
+                <button type="button" class="wishlist-btn <?= in_array($similar['PRODUCT_ID'], $wishlist_items) ? 'active' : '' ?>" 
+                        data-product-id="<?= $similar['PRODUCT_ID']; ?>" 
+                        onclick="toggleWishlist(this)">
+                    <i class="<?= in_array($similar['PRODUCT_ID'], $wishlist_items) ? 'fas' : 'far' ?> fa-heart"></i>
+                </button>
+                <?php endif; ?>
+              </div>
+              <div class="card-body d-flex flex-column p-3">
+                <h5 class="card-title text-truncate mb-1"><?= htmlspecialchars($similar['PRODUCT_NAME']); ?></h5>
+                <div class="text-warning mb-1" style="font-size: 0.9rem;">★★★★★</div>
+                <p class="card-text text-muted small mb-2" style="font-size: 0.85rem;">
+                  <?= htmlspecialchars($similar['DESCRIPTION'] instanceof OCILob ? $similar['DESCRIPTION']->load() : $similar['DESCRIPTION']) ?>
+                </p>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="h6 text-danger mb-0">£<?= number_format($similar['PRICE'], 2); ?></span>
+                  <span class="text-muted small">Stock: <?= $similar['STOCK']; ?></span>
+                </div>
+                <div class="text-muted small mb-2">
+                  Shop: <?= htmlspecialchars($similar['SHOP_NAME']); ?>
+                </div>
+                <div class="d-grid gap-1 mt-auto">
+                  <a href="?id=<?= $similar['PRODUCT_ID'] ?>" class="btn btn-sm btn-secondary">Details</a>
+                  <?php if (!isset($similar['IS_DUMMY']) || !$similar['IS_DUMMY']): ?>
+                  <button type="button" class="btn btn-sm btn-danger" onclick="addToCart(<?= $similar['PRODUCT_ID'] ?>)">Add to Cart</button>
+                  <a href="cart.php?get_id=<?= $similar['PRODUCT_ID'] ?>" class="btn btn-sm btn-success">Buy Now</a>
+                  <?php endif; ?>
+                </div>
               </div>
             </div>
           </div>
@@ -369,63 +499,63 @@ if (isset($_SESSION['user_id'])) {
 
     function decreaseQuantity() {
         const input = document.getElementById('quantity');
-        if (input.value > 1) {
-            input.value = parseInt(input.value) - 1;
+        const currentValue = parseInt(input.value);
+        if (currentValue > 1) {
+            input.value = currentValue - 1;
         }
     }
 
     function increaseQuantity() {
         const input = document.getElementById('quantity');
+        const currentValue = parseInt(input.value);
         const maxStock = <?= $product['STOCK'] ?>;
-        if (input.value < maxStock) {
-            input.value = parseInt(input.value) + 1;
+        if (currentValue < maxStock) {
+            input.value = currentValue + 1;
+        } else {
+            showToast('Maximum stock limit reached', 'error');
         }
     }
 
-    document.getElementById('addToCartForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
+    // Add input validation for quantity
+    document.getElementById('quantity').addEventListener('input', function(e) {
+        const value = parseInt(e.target.value);
+        const maxStock = <?= $product['STOCK'] ?>;
         
-        const form = this;
-        const submitBtn = form.querySelector('button[type="submit"]');
-        const quantity = document.getElementById('quantity').value;
-        const productId = form.querySelector('input[name="product_id"]').value;
+        if (value < 1) {
+            e.target.value = 1;
+        } else if (value > maxStock) {
+            e.target.value = maxStock;
+            showToast('Maximum stock limit reached', 'error');
+        }
+    });
 
+    async function addToCart(productId) {
+        const quantity = document.getElementById('quantity').value;
+        const submitBtn = document.querySelector('button[onclick="addToCart(' + productId + ')"]');
+        
         // Disable button and show loading state
         submitBtn.disabled = true;
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding...';
 
         try {
-            // First validate the quantity
-            const validateResponse = await fetch('update_cart_quantity.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `product_id=${productId}&action=validate&quantity=${quantity}`
-            });
-            const validateResult = await validateResponse.json();
-
-            if (!validateResult.success) {
-                showToast(validateResult.message, 'error');
-                return;
-            }
-
-            // If validation passes, submit the form
-            const formData = new FormData(form);
-            formData.append('add_to_cart', '1');
+            const formData = new FormData();
+            formData.append('product_id', productId);
+            formData.append('quantity', quantity);
             
-            const response = await fetch('cart.php', {
+            const response = await fetch('add_to_cart.php', {
                 method: 'POST',
                 body: formData
             });
 
-            if (response.ok) {
+            const result = await response.json();
+
+            if (result.success) {
                 showToast('Product added to cart successfully');
-                // Reset quantity to minimum order
-                document.getElementById('quantity').value = <?= $product['MIN_ORDER'] ?>;
+                // Reset quantity to 1
+                document.getElementById('quantity').value = 1;
             } else {
-                throw new Error('Failed to add product to cart');
+                throw new Error(result.message || 'Failed to add product to cart');
             }
         } catch (error) {
             showToast(error.message || 'Failed to add product to cart', 'error');
@@ -434,7 +564,7 @@ if (isset($_SESSION['user_id'])) {
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalText;
         }
-    });
+    }
 
     async function toggleWishlist(button) {
         const productId = button.dataset.productId;

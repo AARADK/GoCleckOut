@@ -74,14 +74,94 @@ if (isset($_POST['add'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add Product</title>
 
-    <!-- Bootstrap 4 CSS -->
+    <!-- Bootstrap CSS -->
     <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
-
-    <!-- FontAwesome for Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.1/css/all.min.css">
-
-    <!-- Custom Styles -->
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <!-- Custom CSS -->
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        .submit-btn {
+            background-color: rgb(254, 148, 74);
+            color: white;
+            border: none;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 15px;
+            text-decoration: none;
+            text-align: center;
+            width: 100%;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .submit-btn:hover {
+            background-color: grey;
+            color: white;
+            text-decoration: none;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            font-size: 100px;
+            opacity: 0;
+            right: 0;
+            top: 0;
+            cursor: pointer;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 12px;
+            background: #f9f9f9;
+            border: 1px dashed #ddd;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .file-input-label:hover {
+            border-color: #3498db;
+            background: #f0f7fd;
+        }
+
+        #scan-status {
+            text-align: center;
+            margin: 10px 0;
+            font-weight: 500;
+            color: #28a745;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .rfid-btn {
+            background-color: #28a745;
+        }
+
+        .rfid-btn:hover {
+            background-color: #218838;
+        }
+    </style>
 </head>
 
 <body>
@@ -144,13 +224,19 @@ if (isset($_POST['add'])) {
 
                             <!-- Product Image -->
                             <div class="form-group">
-                                <label for="product_image">Product Image <span class="text-danger">*</span></label>
-                                <input type="file" id="product_image" name="product_image" class="form-control-file" required accept="image/*">
+                                <label>Product Image <span>*</span></label>
+                                <div class="file-input-wrapper">
+                                    <label class="file-input-label">
+                                        <i class="fas fa-cloud-upload-alt"></i> Choose an image file
+                                        <input type="file" name="product_image" required accept="image/*">
+                                    </label>
+                                </div>
                             </div>
 
-                            <!-- Submit Button -->
-                            <button type="submit" class="btn bg-dark text-white" name="add">Add Product</button>
-                            <button class="btn bg-light text-black" onclick="location.href='index.php?page=products'">Cancel</button>
+                            <div class="form-group">
+                                <button type="submit" class="submit-btn" name="add">Add Product</button>
+                                <a href="trader_dashboard.php" class="submit-btn">Go to Dashboard</a>
+                            </div>
                         </form>
                         <!-- Form End -->
 
@@ -165,6 +251,74 @@ if (isset($_POST['add'])) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
 
+    <script>
+        // Modal focus management
+        $('#addProductModal').on('shown.bs.modal', function () {
+            $(this).removeAttr('aria-hidden');
+            $('#product_name').focus();
+        });
+
+        $('#addProductModal').on('hidden.bs.modal', function () {
+            $(this).attr('aria-hidden', 'true');
+        });
+
+        // RFID scanning functionality
+        let scanning = false;
+
+        document.getElementById('enable-rfid').addEventListener('click', () => {
+            scanning = true;
+            document.getElementById('scan-status').style.display = 'block';
+            document.getElementById('scan-status').textContent = "🔄 Scanning RFID...";
+
+            // Trigger Python script via PHP backend
+            fetch('trigger_rfid.php')
+                .then(() => pollRFID());
+        });
+
+        function pollRFID() {
+            if (!scanning) return;
+
+            fetch('rfid_scan.json?' + new Date().getTime())
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.data && data.data.product_name) {
+                        // Fill the form
+                        document.querySelector('[name="product_name"]').value = data.data.product_name;
+                        document.querySelector('[name="description"]').value = data.data.description;
+                        document.querySelector('[name="price"]').value = data.data.price;
+                        document.querySelector('[name="stock"]').value = data.data.stock;
+                        document.querySelector('[name="shop_id"]').value = data.data.shop_id;
+
+                        document.getElementById('scan-status').textContent = "✔️ RFID scanned successfully!";
+                        scanning = false;
+                    } else {
+                        setTimeout(pollRFID, 1000);
+                    }
+                })
+                .catch(() => setTimeout(pollRFID, 1000));
+        }
+    </script>
+
+    <!-- Modal -->
+    <div class="modal fade" id="addProductModal" tabindex="-1" role="dialog" aria-labelledby="addProductModalLabel" aria-modal="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addProductModalLabel">Add New Product</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <!-- Your existing form content -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary">Save changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>

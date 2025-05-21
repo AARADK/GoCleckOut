@@ -199,6 +199,7 @@ if ($conn) {
             shop_id NUMBER NOT NULL,
             user_id NUMBER NOT NULL,
             product_category_name VARCHAR2(20) NOT NULL,
+            rfid VARCHAR2(50) UNIQUE,
             CONSTRAINT fk_product_user FOREIGN KEY (user_id) REFERENCES users(user_id),
             CONSTRAINT fk_product_shop FOREIGN KEY (shop_id) REFERENCES shops(shop_id)
         )

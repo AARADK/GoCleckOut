@@ -254,7 +254,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkout'])) {
                                     <option value="<?= $ts['timeslot_id'] ?>" 
                                             <?= isset($_SESSION['selected_timeslot_id']) && $_SESSION['selected_timeslot_id'] == $ts['timeslot_id'] ? 'selected' : '' ?>>
                                         <?= htmlspecialchars($ts['label']) ?> 
-                                        (<?= $ts['available'] ?> slots available)
                                     </option>
                                 <?php endforeach; ?>
                             </select>

@@ -1,54 +1,22 @@
 <?php
-session_start();
+require_once '../../backend/database/db_connection.php';
 
-// Check if the user is logged in and is a trader
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'trader') {
-    header("Location: login.php");
-    exit();
+$conn = getDBConnection();
+
+if (!$conn) {
+    die("Database connection failed");
 }
 
-// Include the database connection script
-require_once '../database/db_connection.php';
+// Get trader statistics
+$sql = "SELECT 
+        (SELECT COUNT(*) FROM shop) as total_shops,
+        (SELECT COUNT(*) FROM product) as total_products,
+        (SELECT COUNT(*) FROM orders) as total_orders";
 
-// Fetch trader data from users table
-$user_id = $_SESSION['user_id'];
-// try {
-    // Get trader info
-    // $query = "SELECT * FROM users WHERE user_id = :user_id AND role = 'trader'";
-    // $stmt = $db->prepare($query);
-    // $stmt->bindParam(':user_id', $user_id, PDO::PARAM_INT);
-    // $stmt->execute();
-    // $userData = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    // if (!$userData) {
-    //     throw new Exception("Trader data not found");
-    // }
-    
-    // Get recent orders
-    // $ordersQuery = "SELECT o.*, u.full_name as customer_name, u.email as customer_email 
-    //                FROM orders o
-    //                JOIN users u ON o.customer_id = u.user_id
-    //                ORDER BY o.order_date DESC LIMIT 5";
-    // $ordersStmt = $db->prepare($ordersQuery);
-    // $ordersStmt->execute();
-    // $recentOrders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // // Get order statistics
-    // $statsQuery = "SELECT 
-    //     COUNT(*) as total_orders,
-    //     SUM(total_amount) as total_sales,
-    //     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_orders,
-    //     SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_orders
-    //     FROM orders";
-    // $statsStmt = $db->prepare($statsQuery);
-    // $statsStmt->execute();
-    // $orderStats = $statsStmt->fetch(PDO::FETCH_ASSOC);
-    
-// } catch (PDOException $e) {
-//     die("Database error: " . $e->getMessage());
-// } catch (Exception $e) {
-//     die($e->getMessage());
-// }
+$stmt = oci_parse($conn, $sql);
+oci_execute($stmt);
+$stats = oci_fetch_array($stmt, OCI_ASSOC);
+oci_free_statement($stmt);
 
 // Handle order status updates
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && isset($_POST['order_id'])) {
@@ -260,23 +228,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && isset($_
         
         <div class="metrics">
             <div class="metric-card">
+                <h3>Total Shops</h3>
+                <div class="metric-value"><?php echo $stats['total_shops'] ?? 0; ?></div>
+            </div>
+            
+            <div class="metric-card">
+                <h3>Total Products</h3>
+                <div class="metric-value"><?php echo $stats['total_products'] ?? 0; ?></div>
+            </div>
+            
+            <div class="metric-card">
                 <h3>Total Orders</h3>
-                <div class="metric-value"><?php echo $orderStats['total_orders'] ?? 0; ?></div>
-            </div>
-            
-            <div class="metric-card">
-                <h3>Total Sales</h3>
-                <div class="metric-value">$<?php echo number_format($orderStats['total_sales'] ?? 0, 2); ?></div>
-            </div>
-            
-            <div class="metric-card">
-                <h3>Completed Orders</h3>
-                <div class="metric-value"><?php echo $orderStats['completed_orders'] ?? 0; ?></div>
-            </div>
-            
-            <div class="metric-card">
-                <h3>Pending Orders</h3>
-                <div class="metric-value"><?php echo $orderStats['pending_orders'] ?? 0; ?></div>
+                <div class="metric-value"><?php echo $stats['total_orders'] ?? 0; ?></div>
             </div>
         </div>
         

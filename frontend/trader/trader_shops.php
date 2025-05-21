@@ -1,14 +1,27 @@
 <?php
 
-require_once '../../backend/database/db_connection.php'; // assumes PDO $db is set up in this file
+require_once '../../backend/database/db_connection.php';
 
-if (session_status() === PHP_SESSION_NONE) session_start();
-$user_id = $_SESSION['user_id'] ?? null;
+$conn = getDBConnection();
 
-if (!$user_id || $_SESSION['role'] !== 'trader') {
-    header('Location: ../login.php');
-    exit;
+if (!$conn) {
+    die("Database connection failed");
 }
+
+// Get all shops with product count
+$sql = "SELECT s.*, 
+        (SELECT COUNT(*) FROM product WHERE shop_id = s.shop_id) as product_count
+        FROM shop s 
+        ORDER BY s.shop_id DESC";
+
+$stmt = oci_parse($conn, $sql);
+oci_execute($stmt);
+
+$shops = [];
+while ($row = oci_fetch_array($stmt, OCI_ASSOC)) {
+    $shops[] = $row;
+}
+oci_free_statement($stmt);
 
 // Function to safely read LOB data
 function readLob($lob) {
@@ -62,7 +75,7 @@ $trader = oci_fetch_array($trader_stmt, OCI_ASSOC);
 oci_free_statement($trader_stmt);
 
 if (!$trader) {
-    header('Location: ../login.php');
+    header('Location: /GCO/frontend/login/login_portal.php?sign_in=false');
     exit;
 }
 
@@ -261,9 +274,6 @@ $category_display_names = [
     <!-- Toast Container -->
     <div class="toast-container"></div>
 
-    <!-- Header -->
-    <?php include '../header.php' ?>
-
     <div class="container my-5">
         <h2 class="mb-4">My <?= safeDisplay($category_display_names[$trader_category] ?? 'Shops') ?></h2>
         
@@ -384,9 +394,6 @@ $category_display_names = [
             </div>
         </div>
     </div>
-
-    <!-- Footer -->
-    <?php include '../footer.php' ?>
 
     <script>
         // Show toast message if exists

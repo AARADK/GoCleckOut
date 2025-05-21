@@ -9,7 +9,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $email = trim($_POST['email']);
     $password = $_POST['password'];
 
-    // Step 1: Check if email exists
     $sql = "SELECT COUNT(*) AS count FROM USERS WHERE email = :email";
     $stmt = oci_parse($conn, $sql);
     oci_bind_by_name($stmt, ':email', $email);
@@ -18,7 +17,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     if ($row && $row['COUNT'] == 1) {
 
-        // Step 2: Fetch password
         $sql = "SELECT password FROM USERS WHERE email = :email";
         $stmt = oci_parse($conn, $sql);
         oci_bind_by_name($stmt, ':email', $email);
@@ -26,10 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $row = oci_fetch_assoc($stmt);
         $hashedPassword = $row['PASSWORD'];
 
-        // Step 3: Verify password
         if (password_verify((string)$password, (string)$hashedPassword)) {
 
-            // Step 4: Get user_id
             $sql = "SELECT user_id FROM USERS WHERE email = :email";
             $stmt = oci_parse($conn, $sql);
             oci_bind_by_name($stmt, ':email', $email);
@@ -39,7 +35,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             $_SESSION['user_id'] = $user_id;
 
-            // Step 5: Get role
             $sql = "SELECT role FROM USERS WHERE user_id = :user_id";
             $stmt = oci_parse($conn, $sql);
             oci_bind_by_name($stmt, ':user_id', $user_id);
