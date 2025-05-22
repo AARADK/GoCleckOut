@@ -1,5 +1,8 @@
-<?php
+<!-- <?php
   session_start();
+
+  header("Location: trader_dashboard.php");
+  exit();
 ?>
 
 <!DOCTYPE html>
@@ -19,24 +22,24 @@
 
     <div class="row">
       <div class="col-12">
-        <?php require 'trader_header.php'; ?>
+        <?php //require 'trader_header.php'; ?>
       </div>
     </div>
 
     <div class="row">
       <div class="col-md-3 col-lg-2">
-        <?php require 'trader_sidebar.php'; ?>
+        <?php //require 'trader_sidebar.php'; ?>
       </div>
 
       <div class="col-md-9 col-lg-10">
         <div class="content">
           <?php
-            if (isset($_GET['page'])) {
+            /*if (isset($_GET['page'])) {
                 $page = $_GET['page'];
                 include "trader_$page.php";
             } else {
                 include "trader_dashboard.php";
-            }
+            }*/
           ?>
         </div>
       </div>
@@ -48,4 +51,4 @@
   <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
 </body>
-</html>
+</html> -->

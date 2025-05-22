@@ -8,9 +8,6 @@ const TIMERANGES = [
 
 function getTimeslots($days = 10)
 {
-    require_once '../../backend/database/connect.php';
-    $conn = getDBConnection();
-    
     $timezone = new DateTimeZone('+0545');
     $now = new DateTime('now', $timezone);
     $startDate = clone $now;
@@ -77,22 +74,6 @@ function getTimeslots($days = 10)
 
             $timestamp = date('Y-m-d H:i:s', $slotDateTime->getTimestamp());
             
-            $check_sql = "SELECT COUNT(*) as count FROM timeslot WHERE slot_datetime = TO_TIMESTAMP(:timestamp, 'YYYY-MM-DD HH24:MI:SS')";
-            $check_stmt = oci_parse($conn, $check_sql);
-            oci_bind_by_name($check_stmt, ":timestamp", $timestamp);
-            oci_execute($check_stmt);
-            $exists = oci_fetch_array($check_stmt, OCI_ASSOC)['COUNT'] > 0;
-            oci_free_statement($check_stmt);
-
-            if (!$exists) {
-                $insert_sql = "INSERT INTO timeslot (slot_datetime, max_items_remaining, status) 
-                              VALUES (TO_TIMESTAMP(:timestamp, 'YYYY-MM-DD HH24:MI:SS'), 20, 'available')";
-                $insert_stmt = oci_parse($conn, $insert_sql);
-                oci_bind_by_name($insert_stmt, ":timestamp", $timestamp);
-                oci_execute($insert_stmt);
-                oci_free_statement($insert_stmt);
-            }
-
             $timeslots[] = [
                 'label' => $date->format('l') . " - " . TIMERANGES[$index] . " - " . $date->format('Y/m/d'),
                 'timestamp' => $timestamp
@@ -100,6 +81,5 @@ function getTimeslots($days = 10)
         }
     }
 
-    oci_close($conn);
     return $timeslots;
 }

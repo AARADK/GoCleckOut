@@ -80,11 +80,11 @@ executeSQLNoWarnings($conn, "DROP TRIGGER trg_coupon_pk");
 executeSQLNoWarnings($conn, "DROP SEQUENCE coupon_seq");
 executeSQLNoWarnings($conn, "DROP TABLE coupon CASCADE CONSTRAINTS");
 
-// Drop order_products related objects
-executeSQLNoWarnings($conn, "DROP TABLE order_products CASCADE CONSTRAINTS");
-executeSQLNoWarnings($conn, "DROP SEQUENCE order_products_seq");
-executeSQLNoWarnings($conn, "DROP TRIGGER trg_order_products_pk");
-executeSQLNoWarnings($conn, "DROP TRIGGER trg_populate_order_products");
+// Drop order_item related objects
+executeSQLNoWarnings($conn, "DROP TABLE order_item CASCADE CONSTRAINTS");
+executeSQLNoWarnings($conn, "DROP SEQUENCE order_item_seq");
+executeSQLNoWarnings($conn, "DROP TRIGGER trg_order_item_pk");
+executeSQLNoWarnings($conn, "DROP TRIGGER trg_populate_order_item");
 
 // Reorder the table creation sequence
 if ($conn) {
@@ -306,10 +306,11 @@ if ($conn) {
     executeSQL($conn, "
         CREATE TABLE collection_slot (
             collection_slot_id NUMBER PRIMARY KEY,
-            slot_date DATE,
-            slot_day VARCHAR2(10),
+            slot_date DATE NOT NULL,
+            slot_day VARCHAR2(10) NOT NULL,
             slot_time TIMESTAMP NOT NULL,
-            total_order NUMBER
+            slot_duration NUMBER DEFAULT 180,
+            max_order NUMBER DEFAULT 20
         )
     ");
 
@@ -322,6 +323,34 @@ if ($conn) {
             SELECT collection_slot_seq.NEXTVAL INTO :new.collection_slot_id FROM dual;
         END;
     ");
+
+    // Include the timeslot_date.php file and populate collection_slot table
+    require_once '../../frontend/user/timeslot_date.php';
+    $timeslots = getTimeslots(10); // Get timeslots for next 10 days
+
+    foreach ($timeslots as $slot) {
+        $date = DateTime::createFromFormat('Y-m-d H:i:s', $slot['timestamp']);
+        $day = $date->format('l');
+        $date_only = $date->format('Y-m-d');
+        
+        // Extract the time from the label (which contains the correct time)
+        preg_match('/(\d{2}:\d{2}) - \d{2}:\d{2}/', $slot['label'], $matches);
+        $time_only = $matches[1] . ':00';
+        $time_stamp = $date_only . ' ' . $time_only;
+        
+        $insert_sql = "INSERT INTO collection_slot (slot_date, slot_day, slot_time, slot_duration, max_order) 
+                      VALUES (TO_DATE(:date_only, 'YYYY-MM-DD'), :day_name, TO_TIMESTAMP(:time_stamp, 'YYYY-MM-DD HH24:MI:SS'), 180, 20)";
+        
+        $stmt = oci_parse($conn, $insert_sql);
+        oci_bind_by_name($stmt, ':date_only', $date_only);
+        oci_bind_by_name($stmt, ':day_name', $day);
+        oci_bind_by_name($stmt, ':time_stamp', $time_stamp);
+        
+        if (oci_execute($stmt)) {
+            echo "Inserted collection slot for {$day} {$time_only}<br>";
+        }
+        oci_free_statement($stmt);
+    }
 
     // COUPON TABLE
     executeSQL($conn, "
@@ -392,50 +421,17 @@ if ($conn) {
         INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
         VALUES ('BLACKFRIDAY40', ADD_MONTHS(SYSDATE, 2), ADD_MONTHS(SYSDATE, 2) + 7, 'Black Friday special', 40)
     ");
-
-    // ORDERS TABLE
-    executeSQL($conn, "
-        CREATE TABLE orders (
-            order_id NUMBER PRIMARY KEY,
-            order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            total_item_count NUMBER,
-            total_amount NUMBER,
-            coupon_id NUMBER,
-            order_status VARCHAR2(50),
-            collection_slot_id NUMBER,
-            user_id NUMBER NOT NULL,
-            cart_id NUMBER NOT NULL,
-            CONSTRAINT fk_order_user FOREIGN KEY (user_id) REFERENCES users(user_id),
-            CONSTRAINT fk_order_cart FOREIGN KEY (cart_id) REFERENCES cart(cart_id),
-            CONSTRAINT fk_order_coupon FOREIGN KEY (coupon_id) REFERENCES coupon(coupon_id),
-            CONSTRAINT fk_order_slot FOREIGN KEY (collection_slot_id) REFERENCES collection_slot(collection_slot_id)
-        )
-    ");
-    executeSQL($conn, "CREATE SEQUENCE orders_seq START WITH 1 INCREMENT BY 1");
-    executeSQL($conn, "
-        CREATE OR REPLACE TRIGGER trg_orders_pk
-        BEFORE INSERT ON orders
-        FOR EACH ROW
-        BEGIN
-            SELECT orders_seq.NEXTVAL INTO :new.order_id FROM dual;
-        END;
-    ");
-
+    
     // PAYMENT TABLE
     executeSQL($conn, "
         CREATE TABLE payment (
             payment_id NUMBER PRIMARY KEY,
-            timeslot_id NUMBER,
-            cart_id NUMBER,
             user_id NUMBER NOT NULL,
             amount NUMBER NOT NULL,
             payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status VARCHAR2(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
             payment_method VARCHAR2(50),
-            transaction_id VARCHAR2(100),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT fk_payment_user FOREIGN KEY (user_id) REFERENCES users(user_id),
-            CONSTRAINT fk_payment_timeslot_cart FOREIGN KEY (timeslot_id, cart_id) REFERENCES timeslot_cart(timeslot_id, cart_id)
+            CONSTRAINT fk_payment_user FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ");
 
@@ -451,70 +447,60 @@ if ($conn) {
         END;
     ");
 
-    // Create order_products table
+    // ORDERS TABLE
     executeSQL($conn, "
-        CREATE TABLE order_products (
-            order_product_id NUMBER PRIMARY KEY,
+        CREATE TABLE orders (
+            order_id NUMBER PRIMARY KEY,
+            order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_item_count NUMBER,
+            total_amount NUMBER,
+            coupon_id NUMBER,
+            order_status VARCHAR2(50),
+            collection_slot_id NUMBER,
+            user_id NUMBER NOT NULL,
+            cart_id NUMBER NOT NULL,
             payment_id NUMBER NOT NULL,
+            CONSTRAINT fk_order_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+            CONSTRAINT fk_order_cart FOREIGN KEY (cart_id) REFERENCES cart(cart_id),
+            CONSTRAINT fk_order_coupon FOREIGN KEY (coupon_id) REFERENCES coupon(coupon_id),
+            CONSTRAINT fk_order_slot FOREIGN KEY (collection_slot_id) REFERENCES collection_slot(collection_slot_id),
+            CONSTRAINT fk_order_payment FOREIGN KEY (payment_id) REFERENCES payment(payment_id)
+        )
+    ");
+    executeSQL($conn, "CREATE SEQUENCE orders_seq START WITH 1 INCREMENT BY 1");
+    executeSQL($conn, "
+        CREATE OR REPLACE TRIGGER trg_orders_pk
+        BEFORE INSERT ON orders
+        FOR EACH ROW
+        BEGIN
+            SELECT orders_seq.NEXTVAL INTO :new.order_id FROM dual;
+        END;
+    ");
+
+
+    // Create order_item table
+    executeSQL($conn, "
+        CREATE TABLE order_item (
+            order_product_id NUMBER PRIMARY KEY,
+            order_id NUMBER NOT NULL,
             product_id NUMBER NOT NULL,
             product_name VARCHAR2(255) NOT NULL,
             quantity NUMBER NOT NULL,
             unit_price NUMBER(10,2) NOT NULL,
-            total_price NUMBER(10,2) NOT NULL,
             created_at TIMESTAMP DEFAULT SYSTIMESTAMP,
-            CONSTRAINT fk_order_products_payment FOREIGN KEY (payment_id) REFERENCES payment(payment_id) ON DELETE CASCADE,
-            CONSTRAINT fk_order_products_product FOREIGN KEY (product_id) REFERENCES product(product_id) ON DELETE CASCADE
+            CONSTRAINT fk_order_item_order FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
+            CONSTRAINT fk_order_item_product FOREIGN KEY (product_id) REFERENCES product(product_id) ON DELETE CASCADE
         )
     ");
 
-    executeSQL($conn, "CREATE SEQUENCE order_products_seq START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE");
+    executeSQL($conn, "CREATE SEQUENCE order_item_seq START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE");
 
     executeSQL($conn, "
-        CREATE OR REPLACE TRIGGER trg_order_products_pk
-        BEFORE INSERT ON order_products
+        CREATE OR REPLACE TRIGGER trg_order_item_pk
+        BEFORE INSERT ON order_item
         FOR EACH ROW
         BEGIN
-            SELECT order_products_seq.NEXTVAL INTO :NEW.order_product_id FROM dual;
-        END;
-    ");
-
-    // Create trigger to populate order_products when payment is made
-    executeSQL($conn, "
-        CREATE OR REPLACE TRIGGER trg_populate_order_products
-        AFTER INSERT ON payment
-        FOR EACH ROW
-        DECLARE
-            v_cart_id NUMBER;
-        BEGIN
-            -- Get the cart_id from timeslot_cart using timeslot_id and cart_id from payment
-            SELECT cart_id INTO v_cart_id
-            FROM timeslot_cart
-            WHERE timeslot_id = :NEW.timeslot_id
-            AND cart_id = :NEW.cart_id;
-
-            -- Insert products from cart into order_products
-            INSERT INTO order_products (
-                payment_id,
-                product_id,
-                product_name,
-                quantity,
-                unit_price,
-                total_price
-            )
-            SELECT 
-                :NEW.payment_id,
-                p.product_id,
-                p.product_name,
-                cp.quantity,
-                p.price,
-                p.price * cp.quantity
-            FROM cart_product cp
-            JOIN product p ON cp.product_id = p.product_id
-            WHERE cp.cart_id = v_cart_id;
-        EXCEPTION
-            WHEN NO_DATA_FOUND THEN
-                -- Handle case where timeslot_cart entry is not found
-                NULL;
+            SELECT order_item_seq.NEXTVAL INTO :NEW.order_product_id FROM dual;
         END;
     ");
 

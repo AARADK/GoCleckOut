@@ -132,9 +132,108 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['name'])) {
                     <li class="nav-item me-4">
                         <a class="nav-link" href="/GCO/frontend/user/product_page.php"><i class="mx-1 fa fa-box-open"></i>Product</a>
                     </li>
+                    <li class="nav-item me-4">
+                        <button class="btn btn-outline-secondary btn-sm" id="rfidBtn" style="background-color: #ff6b6b; color: white;">
+                            <i class="fas fa-barcode"></i> Scan RFID
+                        </button>
+                    </li>
                     </ul>
                 </div>
             </div>
         </div>
     </div>
 </header>
+
+<script>
+    let listening = false;
+    let interval = null;
+
+    function updateButton() {
+        const btn = document.getElementById('rfidBtn');
+        btn.innerHTML = listening ? 
+            '<i class="fas fa-stop"></i> Stop Scanning' : 
+            '<i class="fas fa-barcode"></i> Scan RFID';
+        btn.style.backgroundColor = listening ? '#dc3545' : '#ff6b6b';
+    }
+
+    function listenRFID() {
+        if (!listening) {
+            // Start listening
+            fetch('/GCO/arduinoreader.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=start'
+            })
+            .then(r => r.json())
+            .then(data => {
+                listening = true;
+                updateButton();
+                pollUID();
+            });
+        } else {
+            // Stop listening
+            fetch('/GCO/arduinoreader.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=stop'
+            })
+            .then(r => r.json())
+            .then(data => {
+                listening = false;
+                updateButton();
+                clearInterval(interval);
+            });
+        }
+    }
+
+    function pollUID() {
+        interval = setInterval(() => {
+            fetch('/GCO/arduinoreader.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=check'
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'read') {
+                    clearInterval(interval);
+                    listening = false;
+                    updateButton();
+                    window.location.href = data.url;
+                }
+            });
+        }, 1000);
+    }
+
+    // Add click event listener to the RFID button
+    document.getElementById('rfidBtn').addEventListener('click', listenRFID);
+
+    // Cleanup when leaving the page
+    window.addEventListener('beforeunload', function() {
+        if (listening) {
+            // Stop listening before navigating
+            fetch('/GCO/arduinoreader.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=stop'
+            });
+            clearInterval(interval);
+        }
+    });
+
+    // Also stop listening when navigating to product detail
+    function navigateToProduct(rfid) {
+        if (listening) {
+            fetch('/GCO/arduinoreader.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=stop'
+            })
+            .then(() => {
+                window.location.href = `/GCO/frontend/user/product_detail.php?rfid=${rfid}`;
+            });
+        } else {
+            window.location.href = `/GCO/frontend/user/product_detail.php?rfid=${rfid}`;
+        }
+    }
+</script>

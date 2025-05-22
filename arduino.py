@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import serial
 import time
-import webbrowser
 import re
 
 SERIAL_PORT = 'COM7' 
 BAUDRATE = 9600
 URL_TEMPLATE = 'http://localhost/GCO/frontend/user/product_detail.php?rfid={}'
+URL_FILE = 'C:\\xampp\\htdocs\\GCO\\rfid_url.txt'
 
 UID_PATTERN = re.compile(r'^[A-F0-9]{8}$')
 
@@ -27,7 +27,8 @@ def read_rfid():
 
                     if UID_PATTERN.match(data):
                         url = URL_TEMPLATE.format(data)
-                        webbrowser.open(url)
+                        with open(URL_FILE, 'w') as f:
+                            f.write(url)
                         time.sleep(3)
 
             except serial.SerialException:

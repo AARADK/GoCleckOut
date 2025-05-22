@@ -1,5 +1,5 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) session_start();
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 include '../../backend/database/connect.php';
 include 'timeslot_date.php';
@@ -65,11 +65,13 @@ if ($user_id) {
 $discount_amount = 0;
 $applied_coupon = null;
 $coupon_error = null;
+$coupon_id = null;
 
 // Check for previously applied coupon first
 if (isset($_SESSION['applied_coupon'])) {
     $applied_coupon = $_SESSION['applied_coupon'];
     $discount_amount = ($total_price * $applied_coupon['COUPON_DISCOUNT_PERCENT']) / 100;
+    $coupon_id = $applied_coupon['COUPON_ID'];
 }
 
 // Handle POST requests
@@ -91,10 +93,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $user_id) {
         oci_free_statement($stmt);
 
         if ($coupon) {
+            $coupon_id = $coupon['COUPON_ID'];
             $_SESSION['applied_coupon'] = $coupon;
             $_SESSION['toast_message'] = "Coupon applied successfully!";
             $_SESSION['toast_type'] = "success";
         } else {
+            $coupon_id = null;
             $_SESSION['toast_message'] = "Invalid or expired coupon code";
             $_SESSION['toast_type'] = "error";
         }
@@ -106,6 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $user_id) {
     
     if (isset($_POST['remove_coupon'])) {
         unset($_SESSION['applied_coupon']);
+        $coupon_id = null;
         $_SESSION['toast_message'] = "Coupon removed";
         $_SESSION['toast_type'] = "success";
         
@@ -122,12 +127,56 @@ if (isset($_SESSION['toast_message'])) {
     unset($_SESSION['toast_message'], $_SESSION['toast_type']);
 }
 
-$timeslots = getTimeslots(7);
+$slots_sql = "
+    SELECT 
+        collection_slot_id,
+        TO_CHAR(slot_date, 'YYYY-MM-DD') as slot_date,
+        slot_day,
+        TO_CHAR(slot_time, 'HH24:MI') as slot_time,
+        slot_duration,
+        max_order
+    FROM collection_slot 
+    WHERE max_order > 0 
+    AND slot_time > SYSTIMESTAMP
+    ORDER BY slot_date ASC, slot_time ASC
+";
+
+$slots_stmt = oci_parse($conn, $slots_sql);
+if (!$slots_stmt) {
+    $error = oci_error($conn);
+    error_log("SQL Parse Error: " . $error['message']);
+}
+
+$execute_result = oci_execute($slots_stmt);
+if (!$execute_result) {
+    $error = oci_error($slots_stmt);
+    error_log("SQL Execute Error: " . $error['message']);
+}
+
+$timeslots = [];
+while ($slot = oci_fetch_array($slots_stmt, OCI_ASSOC)) {
+    // Calculate end time by adding duration (in hours)
+    $start_time = $slot['SLOT_TIME'];
+    $duration_hours = $slot['SLOT_DURATION'] / 60; // Convert minutes to hours
+    $end_time = date('H:i', strtotime($start_time . ' + ' . $duration_hours . ' hours'));
+    
+    $timeslots[] = [
+        'id' => $slot['COLLECTION_SLOT_ID'],
+        'label' => $slot['SLOT_DATE'] . " - " . $slot['SLOT_DAY'] . " - " . $slot['SLOT_TIME'] . " to " . $end_time,
+        'timestamp' => $slot['SLOT_DATE'] . ' ' . $slot['SLOT_TIME'],
+        'end_timestamp' => $slot['SLOT_DATE'] . ' ' . $end_time,
+        'max_order' => $slot['MAX_ORDER']
+    ];
+}
+
+error_log("Total slots fetched: " . count($timeslots));
+error_log("Final timeslots array: " . print_r($timeslots, true));
+
+oci_free_statement($slots_stmt);
 
 $user_id = $_SESSION['user_id'] ?? null;
 
 if (isset($_POST['clear_cart']) && $user_id) {
-    // Delete products from cart_product where cart belongs to this user
     $delete_sql = "
         DELETE FROM cart_product
         WHERE cart_id IN (
@@ -148,22 +197,18 @@ if (isset($_POST['clear_cart']) && $user_id) {
         $_SESSION['toast_type'] = "error";
     }
 
-    // Redirect to avoid form resubmission
     header("Location: " . $_SERVER['REQUEST_URI']);
     exit;
 }
 
-// Add this near the top of the file, after session_start()
 if (isset($_POST['add_to_cart']) && $user_id) {
     $product_id = $_POST['product_id'] ?? null;
     $quantity = $_POST['quantity'] ?? 1;
     
-    // Check if adding this quantity would exceed the limit
     if ($cart_total + $quantity > 20) {
         $_SESSION['toast_message'] = "Cannot add items: Cart would exceed 20 items limit";
         $_SESSION['toast_type'] = "error";
     } else {
-        // Get or create cart for user
         $cart_sql = "SELECT cart_id FROM cart WHERE user_id = :user_id";
         $cart_stmt = oci_parse($conn, $cart_sql);
         oci_bind_by_name($cart_stmt, ":user_id", $user_id);
@@ -172,7 +217,6 @@ if (isset($_POST['add_to_cart']) && $user_id) {
         oci_free_statement($cart_stmt);
 
         if (!$cart_row) {
-            // Create new cart for user
             $create_cart_sql = "INSERT INTO cart (user_id, add_date) VALUES (:user_id, SYSDATE) RETURNING cart_id INTO :cart_id";
             $create_stmt = oci_parse($conn, $create_cart_sql);
             oci_bind_by_name($create_stmt, ":user_id", $user_id);
@@ -183,7 +227,6 @@ if (isset($_POST['add_to_cart']) && $user_id) {
             $cart_id = $cart_row['CART_ID'];
         }
 
-        // Check if product already in cart
         $check_sql = "SELECT quantity FROM cart_product WHERE cart_id = :cart_id AND product_id = :product_id";
         $check_stmt = oci_parse($conn, $check_sql);
         oci_bind_by_name($check_stmt, ":cart_id", $cart_id);
@@ -233,6 +276,69 @@ if (isset($_POST['add_to_cart']) && $user_id) {
     
     // Redirect to avoid form resubmission
     header("Location: " . $_SERVER['REQUEST_URI']);
+    exit;
+}
+
+// Add this after session_start()
+$paypalURL = 'https://www.sandbox.paypal.com/cgi-bin/webscr';
+$paypalID = 'sb-2gbxy41155443@business.example.com';
+
+// Handle form submission for checkout
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout'])) {
+    $selected_timeslot_id = $_POST['timeslot_id'] ?? null;
+    
+    if (!$selected_timeslot_id) {
+        $_SESSION['toast_message'] = "Please select a delivery timeslot";
+        $_SESSION['toast_type'] = "error";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit;
+    }
+
+    // Check if timeslot is still available
+    $check_slot_sql = "SELECT max_order FROM collection_slot WHERE collection_slot_id = :slot_id AND max_order > 0";
+    $check_stmt = oci_parse($conn, $check_slot_sql);
+    oci_bind_by_name($check_stmt, ":slot_id", $selected_timeslot_id);
+    oci_execute($check_stmt);
+    $slot_available = oci_fetch_array($check_stmt, OCI_ASSOC);
+    oci_free_statement($check_stmt);
+
+    if (!$slot_available) {
+        $_SESSION['toast_message'] = "Selected timeslot is no longer available";
+        $_SESSION['toast_type'] = "error";
+        header("Location: " . $_SERVER['PHP_SELF']);
+        exit;
+    }
+
+    // Calculate final total with any applied discount
+    $final_total = $total_price;
+    if (isset($_SESSION['applied_coupon'])) {
+        $discount_percent = $_SESSION['applied_coupon']['COUPON_DISCOUNT_PERCENT'];
+        $final_total = $total_price - ($total_price * $discount_percent / 100);
+    }
+
+    // Store necessary data in session
+    $_SESSION['checkout_data'] = [
+        'cart_id' => $cart_id,
+        'timeslot_id' => $selected_timeslot_id,
+        'amount' => $final_total,
+        'coupon_id' => isset($_SESSION['applied_coupon']) ? $_SESSION['applied_coupon']['COUPON_ID'] : null
+    ];
+
+    // Create PayPal form
+    echo '<form action="' . $paypalURL . '" method="post">';
+    echo '<input type="hidden" name="business" value="' . $paypalID . '">';
+    echo '<input type="hidden" name="cmd" value="_xclick">';
+    echo '<input type="hidden" name="item_name" value="GoCleckOut Order">';
+    echo '<input type="hidden" name="item_number" value="' . $selected_timeslot_id . '-' . $cart_id . '">';
+    echo '<input type="hidden" name="amount" value="' . number_format($final_total, 2, '.', '') . '">';
+    echo '<input type="hidden" name="currency_code" value="GBP">';
+    echo '<input type="hidden" name="quantity" value="1">';
+    
+    echo '<input type="hidden" name="return" value="http://localhost/GCO/frontend/user/payment_success.php?amount=' . $final_total . '&cart_id=' . $cart_id . '&timeslot_id=' . $selected_timeslot_id . '&coupon_id=' . $coupon_id . '&user_id=' . $_SESSION['user_id'] . '">&logged_in=true';
+    echo '<input type="hidden" name="cancel_return" value="http://localhost/GCO/frontend/user/payment_cancel.php?user_id=' . $_SESSION['user_id'] . '&logged_in=true">';
+    echo '<input type="image" name="submit" border="0" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynow_LG.gif" alt="PayPal - The safer, easier way to pay online">';
+    echo '<img alt="" border="0" width="1" height="1" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif">';
+    echo '</form>';
     exit;
 }
 ?>
@@ -487,7 +593,6 @@ if (isset($_POST['add_to_cart']) && $user_id) {
 </head>
 
 <body data-cart-total="<?= $cart_total ?>">
-    <!-- Toast Container -->
     <div class="toast-container">
         <?php if (isset($toast_message)): ?>
             <div class="toast <?= $toast_type ?>" style="display: block;">
@@ -637,11 +742,23 @@ if (isset($_POST['add_to_cart']) && $user_id) {
                     </div>
 
                     <?php if (!empty($cart_items)): ?>
-                        <div class="mt-4">
-                            <a href="checkout.php" class="btn btn-primary w-100">
+                        <form method="post" class="mt-4">
+                            <div class="mb-3">
+                                <label for="timeslot_id" class="form-label">Select Delivery Timeslot:</label>
+                                <select name="timeslot_id" id="timeslot_id" class="form-select" required>
+                                    <option value="">Choose a timeslot...</option>
+                                    <?php foreach ($timeslots as $slot): ?>
+                                        <option value="<?= htmlspecialchars($slot['id']) ?>">
+                                            <?= htmlspecialchars($slot['label']) ?> 
+                                            (<?= $slot['max_order'] ?> slots remaining)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <button type="submit" name="proceed_to_checkout" class="btn btn-primary w-100">
                                 <i class="fas fa-shopping-cart me-2"></i>Proceed to Checkout
-                            </a>
-                        </div>
+                            </button>
+                        </form>
                     <?php endif; ?>
                 </div>
             </div>

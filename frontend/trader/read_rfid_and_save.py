@@ -1,4 +1,3 @@
-# read_rfid_and_save.py
 import serial
 import json
 import time

@@ -1,0 +1,33 @@
+.navbar {
+    background-color: #ffffff !important;
+}
+
+.navbar-brand {
+    color: #1a1a1a !important;
+}
+
+.nav-link {
+    color: #666 !important;
+}
+
+.nav-link:hover {
+    color: #1a1a1a !important;
+}
+
+.nav-link.active {
+    color: #ff6b6b !important;
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        padding: 0.5rem 1rem;
+    }
+    
+    .navbar-brand {
+        font-size: 1.1rem;
+    }
+    
+    .nav-item {
+        margin: 0.25rem 0;
+    }
+}

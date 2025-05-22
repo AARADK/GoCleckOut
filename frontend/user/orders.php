@@ -17,45 +17,23 @@ $user_id = $_SESSION['user_id'];
 // Get user's payment history with timeslot and cart details
 $orders_sql = "
     SELECT 
-        p.payment_id as PAYMENT_ID,
-        p.amount as AMOUNT,
-        TO_CHAR(p.payment_date, 'YYYY-MM-DD HH24:MI:SS') as PAYMENT_DATE,
-        p.payment_method as PAYMENT_METHOD,
-        p.status as PAYMENT_STATUS,
-        p.transaction_id as TRANSACTION_ID,
-        TO_CHAR(t.slot_datetime, 'YYYY-MM-DD HH24:MI:SS') as SLOT_DATETIME,
-        tc.items_count as ITEMS_COUNT,
-        tc.cart_id as CART_ID,
-        ROW_NUMBER() OVER (ORDER BY p.payment_date DESC) as ORDER_NUMBER,
-        NVL(
-            (
-                SELECT LISTAGG(
-                    NVL(op.product_name, 'Unknown Product') || ' (x' || NVL(op.quantity, 0) || ')', 
-                    ', '
-                ) WITHIN GROUP (ORDER BY op.product_name)
-                FROM order_products op
-                WHERE op.payment_id = p.payment_id
-            ),
-            'No products available'
-        ) as PRODUCTS
-    FROM payment p
-    LEFT JOIN order_products op ON op.payment_id = p.payment_id
-    LEFT JOIN cart_product cp ON cp.product_id = op.product_id
-    LEFT JOIN cart c ON c.cart_id = cp.cart_id
-    LEFT JOIN timeslot_cart tc ON tc.cart_id = c.cart_id
-    LEFT JOIN timeslot t ON t.timeslot_id = tc.timeslot_id
-    WHERE p.user_id = :user_id
-    GROUP BY 
-        p.payment_id,
-        p.amount,
-        p.payment_date,
+        o.order_id,
+        TO_CHAR(o.order_date, 'YYYY-MM-DD HH24:MI:SS') as order_date,
+        o.total_amount,
+        o.order_status,
         p.payment_method,
-        p.status,
-        p.transaction_id,
-        t.slot_datetime,
-        tc.items_count,
-        tc.cart_id
-    ORDER BY p.payment_date DESC
+        p.status as payment_status,
+        TO_CHAR(cs.slot_date, 'YYYY-MM-DD') as slot_date,
+        TO_CHAR(cs.slot_time, 'HH24:MI:SS') as slot_time,
+        c.coupon_code,
+        c.coupon_discount_percent,
+        ROW_NUMBER() OVER (ORDER BY o.order_date DESC) as order_number
+    FROM orders o
+    JOIN payment p ON o.payment_id = p.payment_id
+    LEFT JOIN collection_slot cs ON o.collection_slot_id = cs.collection_slot_id
+    LEFT JOIN coupon c ON o.coupon_id = c.coupon_id
+    WHERE o.user_id = :user_id
+    ORDER BY o.order_date DESC
 ";
 
 $stmt = oci_parse($conn, $orders_sql);
@@ -89,24 +67,15 @@ oci_free_statement($stmt);
             background-color: #f8f9fa;
         }
         .orders-container {
-            max-width: 1000px;
+            max-width: 800px;
             margin: 2rem auto;
         }
-        .order-list {
+        .order-card {
             background: white;
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        .order-item {
-            padding: 1rem;
-            border-bottom: 1px solid #eee;
-            transition: background-color 0.2s;
-        }
-        .order-item:last-child {
-            border-bottom: none;
-        }
-        .order-item:hover {
-            background-color: #f8f9fa;
+            margin-bottom: 1rem;
+            padding: 1.5rem;
         }
         .status-badge {
             padding: 0.25rem 0.75rem;
@@ -126,6 +95,20 @@ oci_free_statement($stmt);
             background: #f8d7da;
             color: #721c24;
         }
+        .collection-time {
+            background: #e9ecef;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            display: inline-block;
+            margin: 0.5rem 0;
+        }
+        .discount-badge {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -135,41 +118,50 @@ oci_free_statement($stmt);
         <h2 class="mb-4">My Orders</h2>
         
         <?php if ($has_orders): ?>
-            <div class="order-list">
-                <?php foreach ($orders as $order): ?>
-                    <a href="order_details.php?tx=<?= urlencode($order['TRANSACTION_ID']) ?>" 
-                       class="text-decoration-none text-dark">
-                        <div class="order-item">
-                            <div class="row align-items-center">
-                                <div class="col-md-3">
-                                    <h6 class="mb-1">Order #<?= $order['ORDER_NUMBER'] ?></h6>
+            <?php foreach ($orders as $order): ?>
+                <div class="order-card">
+                    <div class="row align-items-center">
+                        <div class="col-md-4">
+                            <h5 class="mb-1">Order #<?= $order['ORDER_NUMBER'] ?></h5>
+                            <p class="text-muted mb-0">
+                                <?= date('F j, Y, g:i a', strtotime($order['ORDER_DATE'])) ?>
+                            </p>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="collection-time">
+                                <i class="fas fa-clock me-2"></i>
+                                <?= date('F j, Y', strtotime($order['SLOT_DATE'])) ?> 
+                                at <?= date('g:i A', strtotime($order['SLOT_TIME'])) ?>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <span class="status-badge status-<?= strtolower($order['ORDER_STATUS']) ?>">
+                                <?= ucfirst($order['ORDER_STATUS']) ?>
+                            </span>
+                            <?php if (isset($order['COUPON_CODE']) && $order['COUPON_DISCOUNT_PERCENT']): ?>
+                                <div class="discount-badge mt-2">
+                                    <?= $order['COUPON_CODE'] ?> (<?= $order['COUPON_DISCOUNT_PERCENT'] ?>% off)
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
                                     <small class="text-muted">
-                                        <?= date('F j, Y, g:i a', strtotime($order['PAYMENT_DATE'])) ?>
+                                        Payment: <?= ucfirst($order['PAYMENT_METHOD']) ?> 
+                                        (<?= ucfirst($order['PAYMENT_STATUS']) ?>)
                                     </small>
                                 </div>
-                                <div class="col-md-3">
-                                    <span class="status-badge status-<?= strtolower($order['PAYMENT_STATUS']) ?>">
-                                        <?= ucfirst($order['PAYMENT_STATUS']) ?>
-                                    </span>
-                                </div>
-                                <div class="col-md-3">
-                                    <small class="text-muted">
-                                        <?= $order['ITEMS_COUNT'] ?? 0 ?> items
-                                    </small>
-                                </div>
-                                <div class="col-md-3 text-end">
-                                    <h6 class="mb-0 text-primary">
-                                        Rs. <?= number_format($order['AMOUNT'], 2) ?>
-                                    </h6>
-                                    <small class="text-muted">
-                                        <?= htmlspecialchars($order['TRANSACTION_ID'] ?? 'N/A') ?>
-                                    </small>
+                                <div class="text-end">
+                                    <h5 class="mb-0">Rs. <?= number_format($order['TOTAL_AMOUNT'], 2) ?></h5>
                                 </div>
                             </div>
                         </div>
-                    </a>
-                <?php endforeach; ?>
-            </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         <?php else: ?>
             <div class="alert alert-info">
                 <i class="fas fa-info-circle me-2"></i>

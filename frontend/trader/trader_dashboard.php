@@ -25,7 +25,8 @@ $sales_sql = "SELECT
     TRUNC(payment_date) as sale_date,
     NVL(SUM(amount), 0) as total_sales
 FROM payment p
-JOIN order_products op ON p.payment_id = op.payment_id
+JOIN orders o ON p.payment_id = o.payment_id
+JOIN order_item op ON o.order_id = op.order_id
 JOIN product pr ON op.product_id = pr.product_id
 WHERE pr.user_id = :user_id
 AND payment_date >= SYSDATE - 7
@@ -57,7 +58,7 @@ $top_products_sql = "SELECT * FROM (
     SELECT 
         p.product_name,
         NVL(SUM(op.quantity), 0) as total_quantity
-    FROM order_products op
+    FROM order_item op
     JOIN product p ON op.product_id = p.product_id
     WHERE p.user_id = :user_id
     GROUP BY p.product_name
@@ -87,8 +88,8 @@ while ($row = oci_fetch_assoc($stmt)) {
 
 $shop_revenue_sql = "SELECT 
     s.shop_name,
-    NVL(SUM(op.total_price), 0) as total_revenue
-FROM order_products op
+    NVL(SUM(op.quantity * op.unit_price), 0) as total_revenue
+FROM order_item op
 JOIN product p ON op.product_id = p.product_id
 JOIN shops s ON p.shop_id = s.shop_id
 WHERE p.user_id = :user_id
@@ -197,139 +198,242 @@ oci_free_statement($stmt);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trader Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .chart-container {
-            position: relative;
-            margin: auto;
-            height: 400px;
-            width: 100%;
-            margin-bottom: 2rem;
-        }
-        .dashboard-card {
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        .nav-tabs .nav-link {
-            color: #495057;
-        }
-        .nav-tabs .nav-link.active {
-            color: #0d6efd;
-            font-weight: bold;
-        }
-        .tab-content {
-            padding: 1rem 0;
+        body {
+            background: #f8f9fa;
         }
     </style>
 </head>
-<body class="bg-light">
-    <div class="container py-4">
-        <h1 class="mb-4">Trader Dashboard</h1>
-        
+<body>
+    <?php include 'trader_header.php'; ?>
+    <div class="container-fluid">
         <div class="row">
-            <!-- Shop Stock Levels -->
-            <div class="col-md-8">
-                <div class="dashboard-card">
-                    <h3>Product Stocks by Shop</h3>
-                    <ul class="nav nav-tabs" id="shopTabs" role="tablist">
-                        <?php foreach ($shops as $index => $shop): ?>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link <?php echo $index === 0 ? 'active' : ''; ?>" 
-                                    id="shop-<?php echo $shop['id']; ?>-tab" 
-                                    data-bs-toggle="tab" 
-                                    data-bs-target="#shop-<?php echo $shop['id']; ?>" 
-                                    type="button" 
-                                    role="tab">
-                                <?php echo htmlspecialchars($shop['name']); ?>
-                            </button>
-                        </li>
-                        <?php endforeach; ?>
-                    </ul>
-                    <div class="tab-content" id="shopTabsContent">
-                        <?php foreach ($shops as $index => $shop): ?>
-                        <div class="tab-pane fade <?php echo $index === 0 ? 'show active' : ''; ?>" 
-                             id="shop-<?php echo $shop['id']; ?>" 
-                             role="tabpanel">
-                            <div class="chart-container">
-                                <canvas id="shopStockChart-<?php echo $shop['id']; ?>"></canvas>
+            <div class="col-md-3 col-lg-2 px-0">
+                <?php include 'trader_sidebar.php'; ?>
+            </div>
+            <div class="col-md-9 col-lg-10">
+                <div class="mt-5 p-4">
+                    <div class="mb-4">
+                        <h1 class="h3">Welcome back!</h1>
+                        <p class="text-muted">Here's what's happening with your business today.</p>
+                    </div>
+
+                    <div class="row g-4 mb-4">
+                        <!-- Total Sales -->
+                        <div class="col-md-3">
+                            <div class="card shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="bg-primary bg-opacity-10 p-3 rounded">
+                                            <i class="fas fa-dollar-sign text-primary"></i>
+                                        </div>
+                                    </div>
+                                    <h6 class="text-muted mb-2">Total Sales</h6>
+                                    <h4 class="mb-0">$<?php echo number_format(array_sum($sales_data), 2); ?></h4>
+                                </div>
                             </div>
                         </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Stock Comparison -->
-            <div class="col-md-4">
-                <div class="dashboard-card">
-                    <h3>Stock Comparison</h3>
-                    <div class="chart-container">
-                        <canvas id="stockComparisonChart"></canvas>
+                        <!-- Total Products -->
+                        <div class="col-md-3">
+                            <div class="card shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="bg-success bg-opacity-10 p-3 rounded">
+                                            <i class="fas fa-box text-success"></i>
+                                        </div>
+                                    </div>
+                                    <h6 class="text-muted mb-2">Total Products</h6>
+                                    <h4 class="mb-0"><?php echo count($stock_products); ?></h4>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Total Shops -->
+                        <div class="col-md-3">
+                            <div class="card shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="bg-warning bg-opacity-10 p-3 rounded">
+                                            <i class="fas fa-store text-warning"></i>
+                                        </div>
+                                    </div>
+                                    <h6 class="text-muted mb-2">Total Shops</h6>
+                                    <h4 class="mb-0"><?php echo count($shops); ?></h4>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Total Orders -->
+                        <div class="col-md-3">
+                            <div class="card shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="bg-danger bg-opacity-10 p-3 rounded">
+                                            <i class="fas fa-shopping-cart text-danger"></i>
+                                        </div>
+                                    </div>
+                                    <h6 class="text-muted mb-2">Total Orders</h6>
+                                    <h4 class="mb-0"><?php echo array_sum($top_quantities); ?></h4>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Sales Chart -->
+                        <div class="col-md-8">
+                            <div class="card shadow-sm mb-4">
+                                <div class="card-body">
+                                    <h5 class="card-title mb-4">Sales Overview</h5>
+                                    <div style="height: 300px;">
+                                        <canvas id="salesChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Top Products -->
+                        <div class="col-md-4">
+                            <div class="card shadow-sm mb-4">
+                                <div class="card-body">
+                                    <h5 class="card-title mb-4">Top Products</h5>
+                                    <div style="height: 300px;">
+                                        <canvas id="productsChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <!-- Stock Levels -->
+                        <div class="col-md-6">
+                            <div class="card shadow-sm mb-4">
+                                <div class="card-body">
+                                    <h5 class="card-title mb-4">Stock Levels</h5>
+                                    <div class="table-responsive">
+                                        <table class="table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Product</th>
+                                                    <th>Stock</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php for($i = 0; $i < count($stock_products); $i++): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($stock_products[$i]); ?></td>
+                                                    <td><?php echo $stock_levels[$i]; ?></td>
+                                                    <td>
+                                                        <?php if($stock_levels[$i] > 20): ?>
+                                                            <span class="badge bg-success">In Stock</span>
+                                                        <?php elseif($stock_levels[$i] > 5): ?>
+                                                            <span class="badge bg-warning">Low Stock</span>
+                                                        <?php else: ?>
+                                                            <span class="badge bg-danger">Out of Stock</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                                <?php endfor; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Shop Revenue -->
+                        <div class="col-md-6">
+                            <div class="card shadow-sm mb-4">
+                                <div class="card-body">
+                                    <h5 class="card-title mb-4">Shop Revenue</h5>
+                                    <div class="table-responsive">
+                                        <table class="table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Shop</th>
+                                                    <th>Revenue</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php for($i = 0; $i < count($shop_names); $i++): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($shop_names[$i]); ?></td>
+                                                    <td>$<?php echo number_format($shop_revenues[$i], 2); ?></td>
+                                                </tr>
+                                                <?php endfor; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Function to fetch shop stock data
-        async function fetchShopStockData(shopId) {
-            const response = await fetch(`get_shop_stocks.php?shop_id=${shopId}`);
-            return await response.json();
-        }
-
-        // Initialize shop stock charts
-        <?php foreach ($shops as $shop): ?>
-        fetchShopStockData(<?php echo $shop['id']; ?>).then(data => {
-            new Chart(document.getElementById('shopStockChart-<?php echo $shop['id']; ?>'), {
-                type: 'bar',
-                data: {
-                    labels: data.products,
-                    datasets: [{
-                        label: 'Stock Level',
-                        data: data.stocks,
-                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
-                        borderColor: 'rgb(75, 192, 192)',
-                        borderWidth: 1
-                    }]
+        // Sales Chart
+        const salesCtx = document.getElementById('salesChart').getContext('2d');
+        new Chart(salesCtx, {
+            type: 'line',
+            data: {
+                labels: <?php echo json_encode($sales_labels); ?>,
+                datasets: [{
+                    label: 'Sales',
+                    data: <?php echo json_encode($sales_data); ?>,
+                    borderColor: '#ff6b6b',
+                    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Quantity in Stock'
-                            }
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            display: true,
+                            drawBorder: false
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
                         }
                     }
                 }
-            });
+            }
         });
-        <?php endforeach; ?>
 
-        // Stock Comparison Chart
-        new Chart(document.getElementById('stockComparisonChart'), {
-            type: 'pie',
+        // Products Chart
+        const productsCtx = document.getElementById('productsChart').getContext('2d');
+        new Chart(productsCtx, {
+            type: 'doughnut',
             data: {
-                labels: <?php echo json_encode(array_column($stock_comparison, 'category')); ?>,
+                labels: <?php echo json_encode($top_products); ?>,
                 datasets: [{
-                    data: <?php echo json_encode(array_column($stock_comparison, 'total_stock')); ?>,
+                    data: <?php echo json_encode($top_quantities); ?>,
                     backgroundColor: [
-                        'rgba(75, 192, 192, 0.5)',
-                        'rgba(255, 99, 132, 0.5)'
-                    ],
-                    borderColor: [
-                        'rgb(75, 192, 192)',
-                        'rgb(255, 99, 132)'
-                    ],
-                    borderWidth: 1
+                        '#ff6b6b',
+                        '#4ecdc4',
+                        '#45b7d1',
+                        '#96ceb4',
+                        '#ffeead'
+                    ]
                 }]
             },
             options: {
@@ -338,10 +442,6 @@ oci_free_statement($stmt);
                 plugins: {
                     legend: {
                         position: 'bottom'
-                    },
-                    title: {
-                        display: true,
-                        text: 'Your Products vs Other Traders'
                     }
                 }
             }
