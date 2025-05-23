@@ -3,6 +3,9 @@ require_once "../../backend/database/connect.php";
 
 if (session_status() != PHP_SESSION_ACTIVE) session_start();
 
+$erroremail = '';
+$errorpassword = '';
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $conn = getDBConnection();
 
@@ -65,10 +68,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
 
         } else {
-            echo 'Invalid password';
+            header('Location: login_portal.php?sign_in=true&error_password=Invalid%20password&email=' . $email);
         }
 
     } else {
-        echo 'Email not found';
+        header('Location: login_portal.php?sign_in=true&error_email=Email%20not%20found');
     }
 }

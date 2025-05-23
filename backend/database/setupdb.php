@@ -170,7 +170,7 @@ if ($conn) {
         END trg_trader_active;
     ");
 
-    // CART TABLE - create before PRODUCT for proper referencing
+    // CART TABLE
     executeSQL($conn, "
         CREATE TABLE cart (
             cart_id NUMBER PRIMARY KEY,
@@ -736,59 +736,30 @@ if ($conn) {
 
     // Products for Gourmet Delights (first shop of trader 2)
     $gourmet_products = [
-        ['name' => 'Prosciutto di Parma', 'desc' => 'Aged Italian dry-cured ham.', 'price' => 24.99, 'stock' => 30, 'category' => 'delicatessen'],
-        ['name' => 'Truffle Cheese', 'desc' => 'Creamy cheese with black truffle.', 'price' => 18.50, 'stock' => 25, 'category' => 'delicatessen'],
-        ['name' => 'Olive Tapenade', 'desc' => 'Mediterranean olive spread.', 'price' => 12.99, 'stock' => 40, 'category' => 'delicatessen'],
-        ['name' => 'Artisanal Salami', 'desc' => 'Handcrafted Italian salami.', 'price' => 15.99, 'stock' => 35, 'category' => 'delicatessen'],
-        ['name' => 'Balsamic Vinegar', 'desc' => 'Aged balsamic vinegar.', 'price' => 22.99, 'stock' => 20, 'category' => 'delicatessen'],
-        ['name' => 'Goat Cheese', 'desc' => 'Creamy French goat cheese.', 'price' => 14.99, 'stock' => 30, 'category' => 'delicatessen'],
-        ['name' => 'Sun-dried Tomatoes', 'desc' => 'Italian sun-dried tomatoes.', 'price' => 9.99, 'stock' => 45, 'category' => 'delicatessen'],
-        ['name' => 'Pesto Sauce', 'desc' => 'Fresh basil pesto.', 'price' => 11.99, 'stock' => 35, 'category' => 'delicatessen'],
-        ['name' => 'Cured Olives', 'desc' => 'Mixed Mediterranean olives.', 'price' => 13.99, 'stock' => 40, 'category' => 'delicatessen'],
-        ['name' => 'Artisanal Mustard', 'desc' => 'Handcrafted Dijon mustard.', 'price' => 8.99, 'stock' => 50, 'category' => 'delicatessen']
-    ];
-
-    // Products for Artisan Foods (second shop of trader 2)
-    $artisan_products = [
-        ['name' => 'Smoked Salmon', 'desc' => 'Cold-smoked Norwegian salmon.', 'price' => 19.99, 'stock' => 25, 'category' => 'delicatessen'],
-        ['name' => 'Aged Cheddar', 'desc' => '24-month aged English cheddar.', 'price' => 16.99, 'stock' => 30, 'category' => 'delicatessen'],
-        ['name' => 'Marinated Artichokes', 'desc' => 'Italian marinated artichoke hearts.', 'price' => 10.99, 'stock' => 40, 'category' => 'delicatessen'],
-        ['name' => 'Chorizo', 'desc' => 'Spanish cured chorizo.', 'price' => 14.99, 'stock' => 35, 'category' => 'delicatessen'],
-        ['name' => 'Truffle Honey', 'desc' => 'Honey infused with black truffle.', 'price' => 21.99, 'stock' => 20, 'category' => 'delicatessen'],
-        ['name' => 'Blue Cheese', 'desc' => 'French Roquefort blue cheese.', 'price' => 17.99, 'stock' => 25, 'category' => 'delicatessen'],
-        ['name' => 'Capers', 'desc' => 'Sicilian capers in brine.', 'price' => 7.99, 'stock' => 45, 'category' => 'delicatessen'],
-        ['name' => 'Anchovy Paste', 'desc' => 'Italian anchovy paste.', 'price' => 9.99, 'stock' => 35, 'category' => 'delicatessen'],
-        ['name' => 'Dried Porcini', 'desc' => 'Dried Italian porcini mushrooms.', 'price' => 15.99, 'stock' => 30, 'category' => 'delicatessen'],
-        ['name' => 'Herb Butter', 'desc' => 'Handcrafted herb butter.', 'price' => 8.99, 'stock' => 40, 'category' => 'delicatessen']
+        ['name' => 'Paneer Cheese', 'desc' => 'Paneer Cheese with a creamy texture.', 'price' => 24.99, 'stock' => 30,'product_image' => '/GCO/frontend/assets/delicious-paneer-cheese-assortment.jpg', 'category' => 'delicatessen'],
+        ['name' => 'Truffle Cheese', 'desc' => 'Creamy cheese with black truffle.', 'price' => 18.50, 'stock' => 25,'product_image' => '/GCO/frontend/assets/food-flavour-based-sour-cream.jpg', 'category' => 'delicatessen'],
+        ['name' => 'Olive Tapenade', 'desc' => 'Mediterranean olive spread.', 'price' => 12.99, 'stock' => 40,'product_image' => '/GCO/frontend/assets/fresh-salad-with-cherry-tomatoes-basil-mozzarella-black-olives.jpg', 'category' => 'delicatessen'],
+        ['name' => 'Artisanal Salami', 'desc' => 'Handcrafted Italian salami.', 'price' => 15.99, 'stock' => 35,'product_image' => '/GCO/frontend/assets/glass-milk-cow-ai-generated-image.jpg', 'category' => 'delicatessen'],
+        ['name' => 'Balsamic Vinegar', 'desc' => 'Aged balsamic vinegar.', 'price' => 22.99, 'stock' => 20,'product_image' => '/GCO/frontend/assets/homemade-sweet-condensed-milk.jpg', 'category' => 'delicatessen'],
     ];
 
     // Products for Ocean Fresh (first shop of trader 3)
     $ocean_products = [
-        ['name' => 'Fresh Salmon', 'desc' => 'Wild-caught Atlantic salmon.', 'price' => 22.99, 'stock' => 30, 'category' => 'fishmonger'],
-        ['name' => 'Sea Bass', 'desc' => 'Fresh Mediterranean sea bass.', 'price' => 19.99, 'stock' => 25, 'category' => 'fishmonger'],
-        ['name' => 'Tuna Steak', 'desc' => 'Fresh yellowfin tuna steak.', 'price' => 24.99, 'stock' => 20, 'category' => 'fishmonger'],
-        ['name' => 'Prawns', 'desc' => 'Large tiger prawns.', 'price' => 18.99, 'stock' => 35, 'category' => 'fishmonger'],
-        ['name' => 'Mussels', 'desc' => 'Fresh black mussels.', 'price' => 12.99, 'stock' => 40, 'category' => 'fishmonger'],
-        ['name' => 'Cod Fillet', 'desc' => 'Fresh Atlantic cod fillet.', 'price' => 16.99, 'stock' => 30, 'category' => 'fishmonger'],
-        ['name' => 'Squid', 'desc' => 'Fresh whole squid.', 'price' => 14.99, 'stock' => 25, 'category' => 'fishmonger'],
-        ['name' => 'Crab', 'desc' => 'Whole blue crab.', 'price' => 21.99, 'stock' => 20, 'category' => 'fishmonger'],
-        ['name' => 'Oysters', 'desc' => 'Fresh Pacific oysters.', 'price' => 19.99, 'stock' => 35, 'category' => 'fishmonger'],
-        ['name' => 'Scallops', 'desc' => 'Fresh sea scallops.', 'price' => 23.99, 'stock' => 25, 'category' => 'fishmonger']
+        ['name' => 'Fresh Salmon', 'desc' => 'Wild-caught Atlantic salmon.', 'price' => 22.99, 'stock' => 30, 'product_image' =>  '/GCO/frontend/assets/close-up-raw-shrimps-wooden-background.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Sea Bass', 'desc' => 'Fresh Mediterranean sea bass.', 'price' => 19.99, 'stock' => 25, 'product_image' =>  '/GCO/frontend/assets/crab-black-surface.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Tuna Steak', 'desc' => 'Fresh yellowfin tuna steak.', 'price' => 24.99, 'stock' => 20, 'product_image' =>  '/GCO/frontend/assets/delicious-lobster-gourmet-seafood.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Prawns', 'desc' => 'Large tiger prawns.', 'price' => 18.99, 'stock' => 35, 'product_image' =>  '/GCO/frontend/assets/delicious-seafood-lobster-with-lettuce-veggie.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Mussels', 'desc' => 'Fresh black mussels.', 'price' => 12.99, 'stock' => 40, 'product_image' =>  '/GCO/frontend/assets/fresh-squid.jpg', 'category' => 'fishmonger'],
     ];
 
     // Products for Coastal Catch (second shop of trader 3)
     $coastal_products = [
-        ['name' => 'Lobster', 'desc' => 'Live Maine lobster.', 'price' => 29.99, 'stock' => 20, 'category' => 'fishmonger'],
-        ['name' => 'Halibut', 'desc' => 'Fresh Pacific halibut.', 'price' => 21.99, 'stock' => 25, 'category' => 'fishmonger'],
-        ['name' => 'Shrimp', 'desc' => 'Wild-caught Gulf shrimp.', 'price' => 17.99, 'stock' => 35, 'category' => 'fishmonger'],
-        ['name' => 'Clams', 'desc' => 'Fresh littleneck clams.', 'price' => 13.99, 'stock' => 40, 'category' => 'fishmonger'],
-        ['name' => 'Swordfish', 'desc' => 'Fresh swordfish steak.', 'price' => 23.99, 'stock' => 20, 'category' => 'fishmonger'],
-        ['name' => 'Octopus', 'desc' => 'Fresh Mediterranean octopus.', 'price' => 19.99, 'stock' => 25, 'category' => 'fishmonger'],
-        ['name' => 'Sea Urchin', 'desc' => 'Fresh uni (sea urchin).', 'price' => 25.99, 'stock' => 15, 'category' => 'fishmonger'],
-        ['name' => 'Mackerel', 'desc' => 'Fresh Atlantic mackerel.', 'price' => 15.99, 'stock' => 30, 'category' => 'fishmonger'],
-        ['name' => 'Anchovies', 'desc' => 'Fresh Spanish anchovies.', 'price' => 12.99, 'stock' => 35, 'category' => 'fishmonger'],
-        ['name' => 'Sea Trout', 'desc' => 'Fresh sea trout fillet.', 'price' => 18.99, 'stock' => 25, 'category' => 'fishmonger']
-    ];
+        ['name' => 'Lobster', 'desc' => 'Live Maine lobster.', 'price' => 29.99, 'stock' => 20, 'product_image' =>  '/GCO/frontend/assets/front-view-tasty-seafood-dish.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Halibut', 'desc' => 'Fresh Pacific halibut.', 'price' => 21.99, 'stock' => 25, 'product_image' =>  '/GCO/frontend/assets/salmon.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Shrimp', 'desc' => 'Wild-caught Gulf shrimp.', 'price' => 17.99, 'stock' => 35, 'product_image' =>  '/GCO/frontend/assets/top-view-fresh-octopus-ready-cooking.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Clams', 'desc' => 'Fresh littleneck clams.', 'price' => 13.99, 'stock' => 40, 'product_image' =>  '/GCO/frontend/assets/tuna.jpg', 'category' => 'fishmonger'],
+        ['name' => 'Swordfish', 'desc' => 'Fresh swordfish steak.', 'price' => 23.99, 'stock' => 20, 'product_image' =>  '/GCO/frontend/assets/view-raw-trout-still-life.jpg', 'category' => 'fishmonger'],
+];
 
     // Function to insert products for a shop
     function insertProducts($conn, $products, $shop_id, $user_id) {

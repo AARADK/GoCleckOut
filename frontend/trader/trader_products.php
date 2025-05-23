@@ -4,8 +4,8 @@ session_start();
 
 // Check if user is logged in and is a trader
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'trader') {
-    // header('Location: ../login/login.php');
-    // exit;
+    header('Location: ../login_portal.php?sign_in=true');
+    exit;
 }
 
 $user_id = $_SESSION['user_id'];
@@ -100,6 +100,17 @@ oci_free_statement($products_stmt);
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_product'])) {
     try {
+        // Check if RFID already exists
+        $check_rfid_sql = "SELECT COUNT(*) as count FROM product WHERE rfid = :rfid";
+        $check_rfid_stmt = oci_parse($conn, $check_rfid_sql);
+        oci_bind_by_name($check_rfid_stmt, ":rfid", $_POST['rfid']);
+        oci_execute($check_rfid_stmt);
+        $rfid_count = oci_fetch_assoc($check_rfid_stmt)['COUNT'];
+
+        if ($rfid_count > 0) {
+            throw new Exception("A product with this RFID already exists.");
+        }
+
         // Simple insert into products
         $product_sql = "INSERT INTO product (
             product_name, description, price, stock,
@@ -132,8 +143,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_product'])) {
         oci_bind_by_name($stmt, ':category', $product_category);
         oci_bind_by_name($stmt, ':rfid', $_POST['rfid']);
 
-        // Handle image
-        $image_data = file_get_contents('../../assets/images/default-product.jpg');
+        // Handle image - Use a default image if none provided
+        $default_image_path = __DIR__ . '/../../assets/images/default-product.jpg';
+        if (file_exists($default_image_path)) {
+            $image_data = file_get_contents($default_image_path);
+        } else {
+            // Create a simple default image if file doesn't exist
+            $image_data = file_get_contents('data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=');
+        }
+        
         $lob = oci_new_descriptor($conn, OCI_D_LOB);
         $lob->writeTemporary($image_data, OCI_TEMP_BLOB);
         oci_bind_by_name($stmt, ':product_image', $lob, -1, OCI_B_BLOB);
@@ -155,6 +173,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_product'])) {
         header('Location: trader_products.php');
         exit;
     }
+}
+
+// Handle product deletion
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_product'])) {
+    $product_id = $_POST['product_id'];
+    
+    // Verify the product belongs to the trader
+    $verify_sql = "SELECT p.* FROM product p 
+                  JOIN shops s ON p.shop_id = s.shop_id 
+                  WHERE p.product_id = :product_id AND s.user_id = :user_id";
+    $verify_stmt = oci_parse($conn, $verify_sql);
+    oci_bind_by_name($verify_stmt, ":product_id", $product_id);
+    oci_bind_by_name($verify_stmt, ":user_id", $user_id);
+    oci_execute($verify_stmt);
+    
+    if (oci_fetch($verify_stmt)) {
+        // Delete the product
+        $delete_sql = "DELETE FROM product WHERE product_id = :product_id";
+        $delete_stmt = oci_parse($conn, $delete_sql);
+        oci_bind_by_name($delete_stmt, ":product_id", $product_id);
+        
+        if (oci_execute($delete_stmt)) {
+            $_SESSION['success_msg'] = "Product deleted successfully!";
+        } else {
+            $_SESSION['error_msg'] = "Error deleting product.";
+        }
+    } else {
+        $_SESSION['error_msg'] = "You don't have permission to delete this product.";
+    }
+    
+    // Redirect back to the same page with the current shop filter if any
+    $redirect_url = 'trader_products.php';
+    if (isset($_POST['shop_id'])) {
+        $redirect_url .= '?shop_id=' . $_POST['shop_id'];
+    }
+    header('Location: ' . $redirect_url);
+    exit;
 }
 
 // Get product details for editing if product_id is provided
@@ -205,6 +260,20 @@ if (isset($_GET['edit_id'])) {
         href="https://fonts.googleapis.com/icon?family=Material+Icons"
         rel="stylesheet" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .delete-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .delete-btn:hover {
+            background-color: #c82333;
+        }
+    </style>
 </head>
 
 <body>
@@ -318,10 +387,13 @@ if (isset($_GET['edit_id'])) {
                                                             data-bs-target="#editProductModal">
                                                         <i class="material-icons" style="font-size: 1rem;">edit</i>
                                                     </button>
-                                                    <button onclick="deleteProduct(<?= $product['PRODUCT_ID'] ?>)" 
-                                                            class="btn btn-outline-danger btn-sm py-0">
-                                                        <i class="material-icons" style="font-size: 1rem;">delete</i>
-                                                    </button>
+                                                    <form method="POST" action="" style="display: inline;">
+                                                        <input type="hidden" name="product_id" value="<?php echo $product['PRODUCT_ID']; ?>">
+                                                        <?php if (isset($_GET['shop_id'])): ?>
+                                                            <input type="hidden" name="shop_id" value="<?php echo $_GET['shop_id']; ?>">
+                                                        <?php endif; ?>
+                                                        <button type="submit" name="delete_product" class="delete-btn" onclick="return confirm('Are you sure you want to delete this product?')">Delete</button>
+                                                    </form>
                                                 </div>
                                             </div>
                                         </div>
@@ -521,7 +593,7 @@ if (isset($_GET['edit_id'])) {
                         
                         // Trigger Python script via PHP backend
                         console.log('Triggering RFID scan...');
-                        const response = await fetch('trigger_rfid.php', {
+                        const response = await fetch('rfid_read.php', {
                             method: 'GET',
                             headers: {
                                 'Accept': 'application/json'

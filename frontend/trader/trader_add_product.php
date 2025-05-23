@@ -54,7 +54,7 @@ if (isset($_POST['add'])) {
         $image_size = $_FILES['product_image']['size'];
         $image_type = $_FILES['product_image']['type'];
 
-        if ($image_size > PHP_MAX_INT_SIZE) {
+        if ($image_size > PHP_INT_MAX) {
             $warning_msg[] = 'Image size is too large!';
         } else {
             // Read image and convert to base64
@@ -328,7 +328,7 @@ if (isset($_POST['add'])) {
                     scanButton.textContent = 'Scanning';
                     
                     // Trigger Python script via PHP backend
-                    const response = await fetch('trigger_rfid.php', {
+                    const response = await fetch('rfid_read.php', {
                         method: 'GET',
                         headers: {
                             'Accept': 'application/json'

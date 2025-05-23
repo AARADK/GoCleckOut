@@ -13,7 +13,7 @@ $response = [
 switch ($action) {
     case 'start':
         // Start the Python script
-        $python_script = __DIR__ . '/frontend/trader/read_rfid_and_save.py';
+        $python_script = __DIR__ . '/frontend/trader/rfidReader.py';
         if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
             pclose(popen("start /B python \"$python_script\"", "r"));
         } else {
@@ -30,7 +30,7 @@ switch ($action) {
         if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
             exec("taskkill /F /IM python.exe");
         } else {
-            exec("pkill -f read_rfid_and_save.py");
+            exec("pkill -f rfidReader.py");
         }
         $response = [
             'status' => 'success',

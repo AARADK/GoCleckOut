@@ -9,7 +9,7 @@
 <!-- add this in the script part of the file -->
 
                 // Trigger Python script via PHP backend
-        fetch('trigger_rfid.php')
+        fetch('rfid_read.php')
             .then(() => pollRFID());
         });
 
@@ -62,7 +62,7 @@
 
         
         // Trigger Python script via PHP backend
-        fetch('trigger_rfid.php')
+        fetch('rfid_read.php')
             .then(() => pollRFID());
         });
 

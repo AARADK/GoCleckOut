@@ -3,6 +3,15 @@ session_start();
 
 require_once '../../backend/database/connect.php';
 
+if ($_SERVER['REQUEST_METHOD'] == 'GET') {
+    $erroremail = $_GET['error_email'] ?? '';
+    $errorpassword = $_GET['error_password'] ?? '';
+    $tempemail = $_GET['email'] ?? '';
+    unset($_GET['error_email']);
+    unset($_GET['error_password']);
+    unset($_GET['email']);
+}
+
 $categories = [];
 $conn = getDBConnection();
 
@@ -254,11 +263,13 @@ $submitted_name = '';
             <form method="post" action="login.php">
                 <div class="mb-1">
                     <label for="email">Email</label>
-                    <input type="text" class="form-control" id="email" name="email" placeholder="Enter email" value="<?php echo htmlspecialchars($submitted_name); ?>">
+                    <input type="text" class="form-control" id="email" name="email" placeholder="Enter email" value="<?php echo htmlspecialchars($tempemail); ?>">
+                    <small class="text-danger"><?php echo $erroremail; ?></small>
                 </div>
                 <div class="mb-1">
                     <label for="password">Password</label>
                     <input type="password" class="form-control" id="password" name="password" placeholder="Enter password">
+                    <small class="text-danger"><?php echo $errorpassword; ?></small>
                 </div>                                                                    
                 <button type="submit" class="btn btn-primary">Login</button>
             </form>
