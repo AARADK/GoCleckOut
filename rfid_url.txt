@@ -1,1 +1,1 @@
-http://localhost/GCO/frontend/user/product_detail.php?rfid=B6BEBF01
+http://localhost/GCO/frontend/user/product_detail.php?rfid=016C8F02

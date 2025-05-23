@@ -163,7 +163,8 @@ function displayProducts($products, $wishlist_items) {
             $select_products_sql = "SELECT p.*, s.shop_name 
                                    FROM product p 
                                    JOIN shops s ON p.shop_id = s.shop_id 
-                                   WHERE p.product_status = 'active'";
+                                   WHERE p.product_status = 'active'" . 
+                                   (basename($_SERVER['PHP_SELF']) === 'home.php' ? " AND ROWNUM <= 8" : "");
 
             // Add category filter
             if ($category !== 'all') {
