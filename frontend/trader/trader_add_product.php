@@ -1,9 +1,31 @@
 <?php
 require_once '../../backend/database/db_connection.php';
 
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
+$user_id = $_SESSION['user_id'];
 $conn = getDBConnection();
 if (!$conn) {
     die("Database connection failed");
+}
+
+// Get trader's shops
+$shops_sql = "SELECT shop_id, shop_name FROM shops WHERE user_id = :user_id ORDER BY shop_name";
+$shops_stmt = oci_parse($conn, $shops_sql);
+oci_bind_by_name($shops_stmt, ":user_id", $user_id);
+oci_execute($shops_stmt);
+
+$shops = ['shop_id' => 1, 'shop_name' => 'Shop 1'];
+while ($shop = oci_fetch_array($shops_stmt, OCI_ASSOC)) {
+    $shops[] = $shop;
+}
+oci_free_statement($shops_stmt);
+
+if (empty($shops)) {
+    $_SESSION['toast_message'] = "❌ You need to create a shop first before adding products.";
+    $_SESSION['toast_type'] = "error";
+    header('Location: trader_shops.php');
+    exit();
 }
 
 if (isset($_POST['add'])) {
@@ -12,55 +34,80 @@ if (isset($_POST['add'])) {
     $description = filter_var($_POST['description'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
     $price = filter_var($_POST['price'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
     $stock = filter_var($_POST['stock'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-    $min_order = filter_var($_POST['min_order'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-    $max_order = filter_var($_POST['max_order'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-    $product_status = filter_var($_POST['product_status'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    $shop_id = filter_var($_POST['shop_id'], FILTER_SANITIZE_NUMBER_INT);
+    $rfid = filter_var($_POST['rfid'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
 
-    // Image handling
-    $image_tmp_name = $_FILES['product_image']['tmp_name'];
-    $image_size = $_FILES['product_image']['size'];
-    $image_type = $_FILES['product_image']['type']; // e.g., image/jpeg
-
-    if ($image_size > 2000000) {
-        $warning_msg[] = 'Image size is too large!';
-    } else {
-        // Read image and convert to base64
-        $image_data = file_get_contents($image_tmp_name);
-        $base64_image = 'data:' . $image_type . ';base64,' . base64_encode($image_data);
-
-        $add_date = date('Y-m-d');
-
-        // Prepare the SQL insert statement
-        $sql = "INSERT INTO product 
-                (product_name, description, price, stock, min_order, max_order, product_image, add_date, product_status) 
-                VALUES 
-                (:product_name, :description, :price, :stock, :min_order, :max_order, :product_image, TO_DATE((SELECT SYSDATE FROM DUAL), 'YYYY-MM-DD'), :product_status)";
-
-        $stid = oci_parse($conn, $sql);
-
-        // Bind variables
-        oci_bind_by_name($stid, ':product_name', $product_name);
-        oci_bind_by_name($stid, ':description', $description);
-        oci_bind_by_name($stid, ':price', $price);
-        oci_bind_by_name($stid, ':stock', $stock);
-        oci_bind_by_name($stid, ':min_order', $min_order);
-        oci_bind_by_name($stid, ':max_order', $max_order);
-        oci_bind_by_name($stid, ':product_image', $rename);
-        // oci_bind_by_name($stid, ':add_date', $add_date);
-        oci_bind_by_name($stid, ':product_status', $product_status);
-
-        // Execute the statement
-        $exec = oci_execute($stid);
-
-        if ($exec) {
-            move_uploaded_file($image_tmp_name, $image_folder);
-            $success_msg[] = 'Product added!';
-        } else {
-            $e = oci_error($stid);
-            $warning_msg[] = 'Failed to add product: ' . $e['message'];
+    // Validate shop_id belongs to the trader
+    $valid_shop = false;
+    foreach ($shops as $shop) {
+        if ($shop['SHOP_ID'] == $shop_id) {
+            $valid_shop = true;
+            break;
         }
+    }
 
-        oci_free_statement($stid);
+    if (!$valid_shop) {
+        $warning_msg[] = 'Invalid shop selected!';
+    } else {
+        // Image handling
+        $image_tmp_name = $_FILES['product_image']['tmp_name'];
+        $image_size = $_FILES['product_image']['size'];
+        $image_type = $_FILES['product_image']['type'];
+
+        if ($image_size > PHP_MAX_INT_SIZE) {
+            $warning_msg[] = 'Image size is too large!';
+        } else {
+            // Read image and convert to base64
+            $image_data = file_get_contents($image_tmp_name);
+            $base64_image = 'data:' . $image_type . ';base64,' . base64_encode($image_data);
+
+            // Get shop category for product_category_name
+            $shop_category_sql = "SELECT shop_category FROM shops WHERE shop_id = :shop_id";
+            $shop_category_stmt = oci_parse($conn, $shop_category_sql);
+            oci_bind_by_name($shop_category_stmt, ":shop_id", $shop_id);
+            oci_execute($shop_category_stmt);
+            $shop_data = oci_fetch_assoc($shop_category_stmt);
+            $product_category = $shop_data['SHOP_CATEGORY'];
+
+            // Prepare the SQL insert statement
+            $sql = "INSERT INTO product (
+                product_name, description, price, stock,
+                product_image, added_date, updated_date, product_status,
+                discount_percentage, shop_id, user_id, product_category_name, rfid
+            ) VALUES (
+                :product_name, :description, :price, :stock,
+                :product_image, SYSDATE, SYSDATE, 'active', 0,
+                :shop_id, :user_id, :category, :rfid
+            )";
+
+            $stid = oci_parse($conn, $sql);
+
+            // Bind variables
+            oci_bind_by_name($stid, ':product_name', $product_name);
+            oci_bind_by_name($stid, ':description', $description);
+            oci_bind_by_name($stid, ':price', $price);
+            oci_bind_by_name($stid, ':stock', $stock);
+            oci_bind_by_name($stid, ':product_image', $base64_image);
+            oci_bind_by_name($stid, ':shop_id', $shop_id);
+            oci_bind_by_name($stid, ':user_id', $user_id);
+            oci_bind_by_name($stid, ':category', $product_category);
+            oci_bind_by_name($stid, ':rfid', $rfid);
+
+            // Execute the statement
+            $exec = oci_execute($stid);
+
+            if ($exec) {
+                $_SESSION['toast_message'] = "✅ Product added successfully!";
+                $_SESSION['toast_type'] = "success";
+                header('Location: trader_products.php?shop_id=' . $shop_id);
+                exit();
+            } else {
+                $e = oci_error($stid);
+                $warning_msg[] = 'Failed to add product: ' . $e['message'];
+            }
+
+            oci_free_statement($stid);
+        }
     }
 }
 ?>
@@ -177,10 +224,38 @@ if (isset($_POST['add'])) {
                         <!-- Form Start -->
                         <form action="" method="POST" enctype="multipart/form-data">
 
-                            <!-- Product Name -->
+                            <!-- Shop Selection -->
                             <div class="form-group">
-                                <label for="product_name">Product Name <span class="text-danger">*</span></label>
-                                <input type="text" id="product_name" name="product_name" class="form-control" placeholder="Enter product name" required maxlength="100">
+                                <label for="shop_id">Select Shop <span class="text-danger">*</span></label>
+                                <select id="shop_id" name="shop_id" class="form-control" required>
+                                    <option value="">Select a shop</option>
+                                    <?php foreach ($shops as $shop): ?>
+                                        <option value="<?= htmlspecialchars($shop['SHOP_ID']) ?>">
+                                            <?= htmlspecialchars($shop['SHOP_NAME']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+
+                            <!-- Product Name and RFID -->
+                            <div class="row">
+                                <div class="col-md-9">
+                                    <div class="form-group">
+                                        <label for="product_name">Product Name <span class="text-danger">*</span></label>
+                                        <input type="text" id="product_name" name="product_name" class="form-control" placeholder="Enter product name" required maxlength="100">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label for="rfid">RFID</label>
+                                        <div class="input-group">
+                                            <input type="text" id="rfid" name="rfid" class="form-control" maxlength="8" pattern="[0-9]{8}" title="RFID must be exactly 8 digits">
+                                            <button type="button" id="scanRfid" class="btn btn-secondary">
+                                                <i class="fas fa-barcode"></i> Scan
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Description -->
@@ -201,27 +276,6 @@ if (isset($_POST['add'])) {
                                 <input type="number" id="stock" name="stock" class="form-control" placeholder="Enter stock quantity" required min="0">
                             </div>
 
-                            <!-- Minimum Order -->
-                            <div class="form-group">
-                                <label for="min_order">Minimum Order <span class="text-danger">*</span></label>
-                                <input type="number" id="min_order" name="min_order" class="form-control" placeholder="Enter minimum order quantity" required min="1">
-                            </div>
-
-                            <!-- Maximum Order -->
-                            <div class="form-group">
-                                <label for="max_order">Maximum Order <span class="text-danger">*</span></label>
-                                <input type="number" id="max_order" name="max_order" class="form-control" placeholder="Enter maximum order quantity" required min="1">
-                            </div>
-
-                            <!-- Product Status -->
-                            <div class="form-group">
-                                <label for="product_status">Product Status <span class="text-danger">*</span></label>
-                                <select id="product_status" name="product_status" class="form-control" required>
-                                    <option value="In Stock">In Stock</option>
-                                    <option value="Out of Stock">Out of Stock</option>
-                                </select>
-                            </div>
-
                             <!-- Product Image -->
                             <div class="form-group">
                                 <label>Product Image <span>*</span></label>
@@ -238,7 +292,6 @@ if (isset($_POST['add'])) {
                                 <a href="trader_dashboard.php" class="submit-btn">Go to Dashboard</a>
                             </div>
                         </form>
-                        <!-- Form End -->
 
                     </div>
                 </div>
@@ -263,39 +316,88 @@ if (isset($_POST['add'])) {
         });
 
         // RFID scanning functionality
-        let scanning = false;
+        const scanButton = document.getElementById('scanRfid');
+        let isScanning = false;
+        let scanInterval;
 
-        document.getElementById('enable-rfid').addEventListener('click', () => {
-            scanning = true;
-            document.getElementById('scan-status').style.display = 'block';
-            document.getElementById('scan-status').textContent = "🔄 Scanning RFID...";
-
-            // Trigger Python script via PHP backend
-            fetch('trigger_rfid.php')
-                .then(() => pollRFID());
+        scanButton.addEventListener('click', async function() {
+            if (!isScanning) {
+                try {
+                    // Start scanning
+                    isScanning = true;
+                    scanButton.textContent = 'Scanning';
+                    
+                    // Trigger Python script via PHP backend
+                    const response = await fetch('trigger_rfid.php', {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    
+                    // Start polling for new scan
+                    scanInterval = setInterval(checkRfidData, 1000);
+                } catch (error) {
+                    console.error('Error triggering RFID scan:', error);
+                    isScanning = false;
+                    scanButton.textContent = 'Scan';
+                }
+            } else {
+                // Stop scanning
+                isScanning = false;
+                scanButton.textContent = 'Scan';
+                clearInterval(scanInterval);
+            }
         });
 
-        function pollRFID() {
-            if (!scanning) return;
-
-            fetch('rfid_scan.json?' + new Date().getTime())
-                .then(res => res.json())
-                .then(data => {
-                    if (data && data.data && data.data.product_name) {
-                        // Fill the form
-                        document.querySelector('[name="product_name"]').value = data.data.product_name;
-                        document.querySelector('[name="description"]').value = data.data.description;
-                        document.querySelector('[name="price"]').value = data.data.price;
-                        document.querySelector('[name="stock"]').value = data.data.stock;
-                        document.querySelector('[name="shop_id"]').value = data.data.shop_id;
-
-                        document.getElementById('scan-status').textContent = "✔️ RFID scanned successfully!";
-                        scanning = false;
-                    } else {
-                        setTimeout(pollRFID, 1000);
+        function checkRfidData() {
+            fetch('rfid_scan.json?' + new Date().getTime(), {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.text().then(text => {
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        console.error('Invalid JSON response:', text);
+                        throw new Error('Invalid JSON response from server');
                     }
-                })
-                .catch(() => setTimeout(pollRFID, 1000));
+                });
+            })
+            .then(data => {
+                if (data && data.rfid) {
+                    // Stop scanning
+                    isScanning = false;
+                    scanButton.textContent = 'Scan';
+                    clearInterval(scanInterval);
+
+                    // Populate form fields
+                    document.getElementById('rfid').value = data.rfid;
+                    if (data.data) {
+                        if (data.data.product_name) document.getElementById('product_name').value = data.data.product_name;
+                        if (data.data.description) document.getElementById('description').value = data.data.description;
+                        if (data.data.price) document.getElementById('price').value = data.data.price;
+                        if (data.data.stock) document.getElementById('stock').value = data.data.stock;
+                        if (data.data.shop_id) document.getElementById('shop_id').value = data.data.shop_id;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error checking RFID data:', error);
+                // Don't stop scanning on error, just log it
+            });
         }
     </script>
 

@@ -1,5 +1,5 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) session_start();
+session_start();
 
 // Initialize variables
 $rfid = '';
@@ -114,7 +114,9 @@ if (empty($similar_products)) {
             'PRICE' => 899.99,
             'PRODUCT_IMAGE' => null,
             'IS_DUMMY' => true,
-            'SHOP_NAME' => 'Sample Shop'
+            'SHOP_NAME' => 'Sample Shop',
+            'DESCRIPTION' => 'This is a sample similar product description.',
+            'STOCK' => 5
         ],
         [
             'PRODUCT_ID' => 'SIM002',
@@ -122,7 +124,9 @@ if (empty($similar_products)) {
             'PRICE' => 799.99,
             'PRODUCT_IMAGE' => null,
             'IS_DUMMY' => true,
-            'SHOP_NAME' => 'Sample Shop'
+            'SHOP_NAME' => 'Sample Shop',
+            'DESCRIPTION' => 'This is another sample similar product description.',
+            'STOCK' => 3
         ]
     ];
 }
@@ -396,19 +400,28 @@ if (empty($similar_products)) {
             </span>
           </div>
 
-          <p class="mb-4"><?= htmlspecialchars($product['DESCRIPTION'] instanceof OCILob ? $product['DESCRIPTION']->load() : $product['DESCRIPTION']) ?></p>
+          <p class="mb-4"><?= htmlspecialchars($product['DESCRIPTION'] instanceof OCILob ? $product['DESCRIPTION']->load() : ($product['DESCRIPTION'] ?? 'No description available')) ?></p>
 
           <form id="addToCartForm" class="mb-4" action="cart.php" method="POST">
             <input type="hidden" name="product_id" value="<?= $product['PRODUCT_ID'] ?>">
-            <div class="quantity-selector mb-3">
+            <div class="input-group mb-3">
               <button type="button" class="btn btn-outline-secondary" onclick="decreaseQuantity()" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>-</button>
-              <input type="number" name="quantity" id="quantity" value="1" min="1" max="<?= $product['STOCK'] ?>" class="form-control" style="width: 70px;" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>
+              <input type="number" name="quantity" id="quantity" value="1" min="1" max="<?= $product['STOCK'] ?>" 
+                     class="form-control form-control-sm quantity-input" style="max-width: 70px; text-align: center;"
+                     data-product-id="<?= $product['PRODUCT_ID'] ?>" 
+                     onchange="validateQuantity(this)" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>
               <button type="button" class="btn btn-outline-secondary" onclick="increaseQuantity()" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>+</button>
             </div>
             <div class="d-grid gap-2">
-              <button type="button" onclick="addToCart(<?= $product['PRODUCT_ID'] ?>)" class="btn btn-primary" <?= ($product['STOCK'] <= 0 || $product['IS_DUMMY']) ? 'disabled' : '' ?>>
+              <?php if (isset($_SESSION['user_id'])): ?>
+                <button type="submit" name="add_to_cart" class="btn btn-primary" <?= ($product['STOCK'] <= 0 || $product['IS_DUMMY']) ? 'disabled' : '' ?>>
+                  <i class="fas fa-shopping-cart me-2"></i>Add to Cart
+                </button>
+              <?php else: ?>
+                <button type="button" class="btn btn-primary" onclick="location.href='/GCO/frontend/login/login_portal.php?sign_in=true'" <?= ($product['STOCK'] <= 0 || $product['IS_DUMMY']) ? 'disabled' : '' ?>>
                 <i class="fas fa-shopping-cart me-2"></i>Add to Cart
               </button>
+              <?php endif; ?>
               <button type="button" class="wishlist-btn" onclick="toggleWishlist(this)" data-product-id="<?= $product['PRODUCT_ID'] ?>" <?= $product['IS_DUMMY'] ? 'disabled' : '' ?>>
                 <i class="<?= $in_wishlist ? 'fas' : 'far' ?> fa-heart me-2"></i>
                 <?= $in_wishlist ? 'Remove from Wishlist' : 'Add to Wishlist' ?>
@@ -459,11 +472,11 @@ if (empty($similar_products)) {
                 <h5 class="card-title text-truncate mb-1"><?= htmlspecialchars($similar['PRODUCT_NAME']); ?></h5>
                 <div class="text-warning mb-1" style="font-size: 0.9rem;">★★★★★</div>
                 <p class="card-text text-muted small mb-2" style="font-size: 0.85rem;">
-                  <?= htmlspecialchars($similar['DESCRIPTION'] instanceof OCILob ? $similar['DESCRIPTION']->load() : $similar['DESCRIPTION']) ?>
+                    <?= htmlspecialchars($similar['DESCRIPTION'] instanceof OCILob ? $similar['DESCRIPTION']->load() : ($similar['DESCRIPTION'] ?? 'No description available')) ?>
                 </p>
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <span class="h6 text-danger mb-0">£<?= number_format($similar['PRICE'], 2); ?></span>
-                  <span class="text-muted small">Stock: <?= $similar['STOCK']; ?></span>
+                    <span class="text-muted small">Stock: <?= $similar['STOCK'] ?? 'N/A'; ?></span>
                 </div>
                 <div class="text-muted small mb-2">
                   Shop: <?= htmlspecialchars($similar['SHOP_NAME']); ?>
@@ -497,74 +510,45 @@ if (empty($similar_products)) {
         }).showToast();
     }
 
+    function validateQuantity(input) {
+        const productId = input.dataset.productId;
+        const quantity = parseInt(input.value);
+        const maxStock = parseInt(input.max);
+        
+        if (quantity < 1) {
+            input.value = 1;
+            showToast('Minimum quantity is 1', 'error');
+        } else if (quantity > maxStock) {
+            input.value = maxStock;
+            showToast(`Maximum available stock is ${maxStock}`, 'error');
+        }
+    }
+
     function decreaseQuantity() {
         const input = document.getElementById('quantity');
         const currentValue = parseInt(input.value);
         if (currentValue > 1) {
             input.value = currentValue - 1;
+            validateQuantity(input);
         }
     }
 
     function increaseQuantity() {
         const input = document.getElementById('quantity');
         const currentValue = parseInt(input.value);
-        const maxStock = <?= $product['STOCK'] ?>;
+        const maxStock = parseInt(input.max);
         if (currentValue < maxStock) {
             input.value = currentValue + 1;
+            validateQuantity(input);
         } else {
-            showToast('Maximum stock limit reached', 'error');
+            showToast(`Maximum available stock is ${maxStock}`, 'error');
         }
     }
 
     // Add input validation for quantity
     document.getElementById('quantity').addEventListener('input', function(e) {
-        const value = parseInt(e.target.value);
-        const maxStock = <?= $product['STOCK'] ?>;
-        
-        if (value < 1) {
-            e.target.value = 1;
-        } else if (value > maxStock) {
-            e.target.value = maxStock;
-            showToast('Maximum stock limit reached', 'error');
-        }
+        validateQuantity(this);
     });
-
-    async function addToCart(productId) {
-        const quantity = document.getElementById('quantity').value;
-        const submitBtn = document.querySelector('button[onclick="addToCart(' + productId + ')"]');
-        
-        // Disable button and show loading state
-        submitBtn.disabled = true;
-        const originalText = submitBtn.innerHTML;
-        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding...';
-
-        try {
-            const formData = new FormData();
-            formData.append('product_id', productId);
-            formData.append('quantity', quantity);
-            
-            const response = await fetch('add_to_cart.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                showToast('Product added to cart successfully');
-                // Reset quantity to 1
-                document.getElementById('quantity').value = 1;
-            } else {
-                throw new Error(result.message || 'Failed to add product to cart');
-            }
-        } catch (error) {
-            showToast(error.message || 'Failed to add product to cart', 'error');
-        } finally {
-            // Restore button state
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = originalText;
-        }
-    }
 
     async function toggleWishlist(button) {
         const productId = button.dataset.productId;

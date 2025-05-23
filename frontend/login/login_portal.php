@@ -131,12 +131,113 @@ $submitted_name = '';
             background-color: rgb(83, 83, 83);
         }
 
+        .btn-primary:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        .form-disabled {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
         select option {
             background: rgb(83 83 83 / 51%);
         }
 
         select option:hover {
             background: rgb(155 83 83 / 51%);
+        }
+
+        .password-requirements {
+            font-size: 0.7rem;
+            color: #ff6b6b;
+            margin-top: 2px;
+            text-align: left;
+        }
+
+        .requirement {
+            color: #ccc;
+            margin: 2px 0;
+        }
+
+        .requirement.valid {
+            color: #4CAF50;
+        }
+
+        .requirement.invalid {
+            color: #ff6b6b;
+        }
+
+        .error-message {
+            color: #ff6b6b;
+            font-size: 0.7rem;
+            margin-top: 2px;
+            text-align: left;
+        }
+
+        .password-requirement-bubble {
+            position: absolute;
+            background: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            margin-left: 10px;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .password-requirement-bubble::before {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 50%;
+            transform: translateY(-50%);
+            border-width: 6px 6px 6px 0;
+            border-style: solid;
+            border-color: transparent #333 transparent transparent;
+        }
+
+        .password-input-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .requirement-met {
+            color: #4CAF50;
+        }
+
+        .requirement-not-met {
+            color: #ff6b6b;
+        }
+
+        .password-requirement {
+            font-size: 0.7rem;
+            margin-top: 4px;
+            text-align: left;
+            min-height: 16px;
+        }
+
+        .email-status {
+            font-size: 0.7rem;
+            margin-top: 4px;
+            text-align: left;
+            min-height: 16px;
+        }
+
+        .email-valid {
+            color: #4CAF50;
+        }
+
+        .email-invalid {
+            color: #ff6b6b;
+        }
+
+        .email-checking {
+            color: #666;
         }
 
     </style>
@@ -169,20 +270,21 @@ $submitted_name = '';
             <form method="post" action="reg.php" autocomplete="off">
                 <div class="mb-1">
                     <label for="username">Username</label>
-                    <input type="text" class="form-control" id="username" name="username" placeholder="Choose a username" value="Aarjan">
+                    <input type="text" class="form-control" id="username" name="username" placeholder="Choose a username" value="">
                 </div>
                 <div class="mb-1">
                     <label for="email">Email</label>
-                    <input type="email" class="form-control" id="email" name="email" placeholder="Enter email" value="<?php echo htmlspecialchars($submitted_name); ?>" oninput="updateHiddenEmail()">
+                    <input type="email" class="form-control" id="email" name="email" placeholder="Enter email" value="<?php echo htmlspecialchars($submitted_name); ?>" oninput="validateEmail(this)">
+                    <div id="emailStatus" class="email-status"></div>
                 </div>
                 <div class="mb-1">
                     <label for="phone">Phone</label>
-                    <input type="text" class="form-control" id="phone" name="phone" placeholder="Enter phone number" value="9840204215">
+                    <input type="text" class="form-control" id="phone" name="phone" placeholder="Enter phone number" value="">
                 </div>
                 <div class="mb-1">
                     <label for="role">Role</label>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="role" id="inlineRadio1" value="customer">
+                        <input class="form-check-input" type="radio" name="role" id="inlineRadio1" value="customer" checked>
                         <label class="form-check-label" for="inlineRadio1">User</label>
                     </div>
                     <div class="form-check form-check-inline">
@@ -204,11 +306,12 @@ $submitted_name = '';
 
                 <div class="mb-1">
                     <label for="password">Password</label>
-                    <input type="password" class="form-control" id="password" name="password" value="123" placeholder="Create password">
+                    <input type="password" class="form-control" id="password" name="password" placeholder="Create password" oninput="validatePassword(this)">
+                    <div id="passwordRequirement" class="password-requirement"></div>
                 </div>
                 <div class="mb-1">
                     <label for="confirm_password">Confirm Password</label>
-                    <input type="password" class="form-control" id="confirm_password" name="confirm_password" value="123" placeholder="Confirm password">
+                    <input type="password" class="form-control" id="confirm_password" name="confirm_password" value="" placeholder="Confirm password">
                 </div>                                                                                               
                 <button type="submit" name="submit" class="btn btn-primary" value="register">Register</button>
             </form>
@@ -240,6 +343,140 @@ $submitted_name = '';
         window.addEventListener('DOMContentLoaded', () => {
             if (traderRadio.checked) {
                 dropdown.style.display = 'block';
+            }
+        });
+
+        let emailTimeout;
+        let isEmailRegistered = false;
+
+        function validateEmail(input) {
+            const email = input.value;
+            const emailStatus = document.getElementById('emailStatus');
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const submitButton = document.querySelector('button[type="submit"]');
+            
+            // Clear any existing timeout
+            if (emailTimeout) {
+                clearTimeout(emailTimeout);
+            }
+
+            // Reset button state
+            isEmailRegistered = false;
+            submitButton.disabled = false;
+
+            // Basic format validation
+            if (!email) {
+                emailStatus.textContent = '';
+                emailStatus.className = 'email-status';
+                return;
+            }
+
+            if (!emailRegex.test(email)) {
+                emailStatus.textContent = 'Please enter a valid email address';
+                emailStatus.className = 'email-status email-invalid';
+                return;
+            }
+
+            // Show checking status
+            emailStatus.textContent = 'Checking email availability...';
+            emailStatus.className = 'email-status email-checking';
+
+            // Set timeout to prevent too many requests
+            emailTimeout = setTimeout(() => {
+                // Check email availability
+                fetch(`check_email.php?email=${encodeURIComponent(email)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            emailStatus.textContent = 'Error checking email';
+                            emailStatus.className = 'email-status email-invalid';
+                            return;
+                        }
+
+                        if (data.exists) {
+                            emailStatus.textContent = data.message;
+                            emailStatus.className = 'email-status email-invalid';
+                            isEmailRegistered = true;
+                            submitButton.disabled = true;
+                        } else {
+                            emailStatus.textContent = data.message;
+                            emailStatus.className = 'email-status email-valid';
+                        }
+                    })
+                    .catch(error => {
+                        emailStatus.textContent = 'Error checking email';
+                        emailStatus.className = 'email-status email-invalid';
+                    });
+            }, 500);
+        }
+
+        const passwordRequirements = [
+            { id: 'length', text: 'At least 8 characters', regex: /.{8,}/ },
+            { id: 'lowercase', text: 'At least one lowercase letter', regex: /[a-z]/ },
+            { id: 'uppercase', text: 'At least one uppercase letter', regex: /[A-Z]/ },
+            { id: 'number', text: 'At least one number', regex: /[0-9]/ },
+            { id: 'special', text: 'At least one special character', regex: /[!@#$%^&*(),.?":{}|<>]/ }
+        ];
+
+        let currentRequirementIndex = 0;
+
+        function validatePassword(input) {
+            const password = input.value;
+            const requirementElement = document.getElementById('passwordRequirement');
+            
+            // If password is empty, clear the requirement text
+            if (!password) {
+                requirementElement.textContent = '';
+                requirementElement.className = 'password-requirement';
+                return;
+            }
+
+            // Check current requirement
+            const currentRequirement = passwordRequirements[currentRequirementIndex];
+            const isMet = currentRequirement.regex.test(password);
+
+            // Update requirement text and style
+            requirementElement.textContent = currentRequirement.text;
+            requirementElement.className = 'password-requirement ' + 
+                (isMet ? 'requirement-met' : 'requirement-not-met');
+
+            // If current requirement is met, move to next one
+            if (isMet) {
+                currentRequirementIndex = (currentRequirementIndex + 1) % passwordRequirements.length;
+                // If we've checked all requirements and they're all met, clear the text
+                if (currentRequirementIndex === 0 && passwordRequirements.every(req => req.regex.test(password))) {
+                    requirementElement.textContent = '';
+                    requirementElement.className = 'password-requirement';
+                }
+            }
+        }
+
+        // Update form validation
+        document.querySelector('form').addEventListener('submit', function(e) {
+            const email = document.getElementById('email').value;
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const emailStatus = document.getElementById('emailStatus');
+            
+            if (!emailRegex.test(email)) {
+                e.preventDefault();
+                emailStatus.textContent = 'Please enter a valid email address';
+                emailStatus.className = 'email-status email-invalid';
+                return;
+            }
+
+            if (isEmailRegistered) {
+                e.preventDefault();
+                return;
+            }
+
+            // Password validation remains the same
+            const password = document.getElementById('password').value;
+            const allRequirementsMet = passwordRequirements.every(req => req.regex.test(password));
+            if (!allRequirementsMet) {
+                e.preventDefault();
+                currentRequirementIndex = passwordRequirements.findIndex(req => !req.regex.test(password));
+                validatePassword(document.getElementById('password'));
+                return;
             }
         });
     </script>

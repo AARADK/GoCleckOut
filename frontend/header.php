@@ -57,24 +57,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['name'])) {
     body {
         padding-top: 100px;
     }
-
-    .wishlist-badge {
-        position: relative;
-        display: inline-block;
-    }
-
-    .wishlist-count {
-        position: absolute;
-        top: -8px;
-        right: -8px;
-        background-color: #ff6b6b;
-        color: white;
-        border-radius: 50%;
-        padding: 2px 6px;
-        font-size: 12px;
-        min-width: 18px;
-        text-align: center;
-    }
 </style>
 
 <header class="bg-white border-bottom">
@@ -133,7 +115,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['name'])) {
                         <a class="nav-link" href="/GCO/frontend/user/product_page.php"><i class="mx-1 fa fa-box-open"></i>Product</a>
                     </li>
                     <li class="nav-item me-4">
-                        <button class="btn btn-outline-secondary btn-sm" id="rfidBtn" style="background-color: #ff6b6b; color: white;">
+                        <button class="btn btn-outline-secondary btn-sm" oncl id="rfidBtn" style="background-color: #ff6b6b; color: white;">
                             <i class="fas fa-barcode"></i> Scan RFID
                         </button>
                     </li>
@@ -149,7 +131,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['name'])) {
     let interval = null;
 
     function updateButton() {
-        const btn = document.getElementById('rfidBtn');
+            const btn = document.getElementById('rfidBtn');
         btn.innerHTML = listening ? 
             '<i class="fas fa-stop"></i> Stop Scanning' : 
             '<i class="fas fa-barcode"></i> Scan RFID';

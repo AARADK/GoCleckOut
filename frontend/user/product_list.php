@@ -86,8 +86,11 @@ function displayProducts($products, $wishlist_items) {
                         </div>
                         <div class="d-grid gap-1 mt-auto">
                             <a href="/GCO/frontend/user/product_detail.php?id=<?= $product['PRODUCT_ID']; ?>" class="btn btn-sm btn-secondary">Details</a>
-                            <button type="submit" name="add_to_cart" class="btn btn-sm btn-danger">Add to Cart</button>
-                            <a href="/GCO/frontend/user/cart.php?get_id=<?= $product['PRODUCT_ID']; ?>" class="btn btn-sm btn-success">Buy Now</a>
+                            <?php print_r($_SESSION); if (isset($_SESSION['user_id'])): ?>
+                                <button type="submit" name="add_to_cart" class="btn btn-sm btn-danger">Add to Cart</button>
+                            <?php else: ?>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="location.href='/GCO/frontend/login/login_portal.php?sign_in=true'">Add to Cart</button>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </form>
@@ -265,8 +268,11 @@ function displayProducts($products, $wishlist_items) {
                                 </div>
                                 <div class="d-grid gap-1 mt-auto">
                                     <a href="/GCO/frontend/user/product_detail.php?id=<?= $fetch_product['PRODUCT_ID']; ?>" class="btn btn-sm btn-secondary">Details</a>
-                                    <button type="submit" name="add_to_cart" class="btn btn-sm btn-danger">Add to Cart</button>
-                                    <a href="/GCO/frontend/user/cart.php?get_id=<?= $fetch_product['PRODUCT_ID']; ?>" class="btn btn-sm btn-success">Buy Now</a>
+                                    <?php if (isset($_SESSION['user_id'])): ?>
+                                        <button type="submit" name="add_to_cart" class="btn btn-sm btn-danger">Add to Cart</button>
+                                    <?php else: ?>
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="location.href='/GCO/frontend/login/login_portal.php?sign_in=true'">Add to Cart</button>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         </form>

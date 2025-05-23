@@ -1,7 +1,14 @@
 <?php
-
 require_once '../../backend/database/db_connection.php';
 
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'trader') {
+    // header('Location: ../login/login_portal.php');
+    // exit();
+}
+
+$user_id = $_SESSION['user_id'];
 $conn = getDBConnection();
 
 if (!$conn) {
@@ -11,7 +18,7 @@ if (!$conn) {
 // Get all shops with product count
 $sql = "SELECT s.*, 
         (SELECT COUNT(*) FROM product WHERE shop_id = s.shop_id) as product_count
-        FROM shop s 
+        FROM shops s 
         ORDER BY s.shop_id DESC";
 
 $stmt = oci_parse($conn, $sql);
@@ -75,12 +82,14 @@ $trader = oci_fetch_array($trader_stmt, OCI_ASSOC);
 oci_free_statement($trader_stmt);
 
 if (!$trader) {
-    header('Location: /GCO/frontend/login/login_portal.php?sign_in=false');
-    exit;
+    $_SESSION['toast_message'] = "❌ Error: Trader information not found.";
+    $_SESSION['toast_type'] = "error";
+    header('Location: trader_dashboard.php');
+    exit();
 }
 
 // Convert category name to lowercase and ensure it's a string
-$trader_category = strtolower(readLob($trader['CATEGORY_NAME']));
+$trader_category = strtolower($trader['CATEGORY_NAME']);
 
 // Get existing shops for this trader
 $shops_sql = "SELECT * FROM shops WHERE user_id = :user_id ORDER BY shop_id";
@@ -98,14 +107,45 @@ while ($shop = oci_fetch_array($shops_stmt, OCI_ASSOC)) {
 }
 oci_free_statement($shops_stmt);
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && count($existing_shops) < 2) {
+// Handle form submission for shop updates
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    if ($_POST['action'] === 'update_shop') {
+        $shop_id = $_POST['shop_id'];
     $shop_name = $_POST['shop_name'];
-    $shop_email = $_POST['shop_email'];
-    $phone_no = $_POST['phone_no'];
+        $shop_email = $_POST['shop_email'] ?? '';
+        $shop_contact_no = $_POST['shop_contact_no'];
+        $description = $_POST['description'] ?? '';
 
-    if ($shop_name && $shop_email && $phone_no) {
-        $description = "Welcome to " . $shop_name; // Default description
-        
+        $update_sql = "UPDATE shops 
+                      SET shop_name = :shop_name,
+                          shop_email = :shop_email,
+                          shop_contact_no = :shop_contact_no,
+                          description = :description
+                      WHERE shop_id = :shop_id AND user_id = :user_id";
+
+        $stmt = oci_parse($conn, $update_sql);
+        oci_bind_by_name($stmt, ":shop_name", $shop_name);
+        oci_bind_by_name($stmt, ":shop_email", $shop_email);
+        oci_bind_by_name($stmt, ":shop_contact_no", $shop_contact_no);
+        oci_bind_by_name($stmt, ":description", $description);
+        oci_bind_by_name($stmt, ":shop_id", $shop_id);
+        oci_bind_by_name($stmt, ":user_id", $user_id);
+
+        if (oci_execute($stmt)) {
+            $success_message = "Shop updated successfully!";
+        } else {
+            $error_message = "Failed to update shop. Please try again.";
+        }
+        oci_free_statement($stmt);
+    } elseif ($_POST['action'] === 'add_shop') {
+        $shop_name = $_POST['shop_name'];
+        $shop_email = $_POST['shop_email'] ?? '';
+        $shop_contact_no = $_POST['shop_contact_no'];
+        $description = $_POST['description'] ?: "Welcome to " . $shop_name;
+
+        if (empty($shop_name) || empty($shop_email) || empty($shop_contact_no)) {
+            $error_message = "Please fill all required fields.";
+        } else {
         $insert_sql = "INSERT INTO shops (user_id, shop_category, shop_name, description, shop_email, shop_contact_no)
                       VALUES (:user_id, :shop_category, :shop_name, :description, :shop_email, :shop_contact_no)";
         
@@ -116,22 +156,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && count($existing_shops) < 2) {
         oci_bind_by_name($stmt, ':shop_name', $shop_name);
         oci_bind_by_name($stmt, ':description', $description);
         oci_bind_by_name($stmt, ':shop_email', $shop_email);
-        oci_bind_by_name($stmt, ':shop_contact_no', $phone_no);
+            oci_bind_by_name($stmt, ':shop_contact_no', $shop_contact_no);
 
         if (oci_execute($stmt)) {
-            $_SESSION['toast_message'] = "✅ Shop added successfully!";
-            $_SESSION['toast_type'] = "success";
+                $success_message = "Shop added successfully!";
             header("Location: " . $_SERVER['REQUEST_URI']);
             exit;
         } else {
-            $error = oci_error($stmt);
-            $_SESSION['toast_message'] = "❌ Error adding shop: " . $error['message'];
-            $_SESSION['toast_type'] = "error";
+                $error_message = "Failed to add shop. Please try again.";
+            }
+            oci_free_statement($stmt);
         }
-        oci_free_statement($stmt);
-    } else {
-        $_SESSION['toast_message'] = "❌ Please fill all required fields.";
-        $_SESSION['toast_type'] = "error";
     }
 }
 
@@ -143,251 +178,184 @@ $category_display_names = [
     'bakery' => 'Bakery Shop',
     'delicatessen' => 'Delicatessen Shop'
 ];
+
+// Get all shops for the trader
+$sql = "SELECT s.shop_id, s.shop_name, s.shop_category, s.shop_email, s.shop_contact_no, 
+               TO_CHAR(s.description) as description, s.register_date
+        FROM shops s 
+        WHERE s.user_id = :user_id 
+        ORDER BY s.register_date DESC";
+
+$stmt = oci_parse($conn, $sql);
+oci_bind_by_name($stmt, ":user_id", $user_id);
+oci_execute($stmt);
+
+$shops = [];
+while ($row = oci_fetch_assoc($stmt)) {
+    $shops[] = $row;
+}
+
+oci_free_statement($stmt);
+oci_close($conn);
 ?>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>My Shops - GoCleckOut</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Shops | GoCleckOut</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         .shop-card {
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-            transition: 0.3s;
-            height: 100%;
-            min-height: 400px;
-            background: #fff;
+            transition: transform 0.2s;
         }
-
         .shop-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
         }
-
-        .shop-header {
+        .form-control:disabled {
             background-color: #f8f9fa;
-            border-radius: 10px 10px 0 0;
-            padding: 15px;
         }
-
-        .shop-category {
-            color: #f44357;
-            font-weight: 600;
-            text-transform: capitalize;
-        }
-
-        .shop-name {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin: 10px 0;
-        }
-
-        .shop-details {
-            padding: 15px;
-        }
-
-        .shop-contact {
-            color: #6c757d;
-            font-size: 0.9rem;
-        }
-
-        .shop-contact i {
-            width: 20px;
-            color: #f44357;
-        }
-
-        .add-shop-form {
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .form-label {
-            font-weight: 500;
-            color: #495057;
-        }
-
-        .btn-primary {
-            background-color: #f44357;
-            border-color: #f44357;
-        }
-
-        .btn-primary:hover {
-            background-color: #d7374a;
-            border-color: #d7374a;
-        }
-
-        .empty-shop-card {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            padding: 20px;
-            height: 100%;
-            color: #6c757d;
-        }
-
-        .empty-shop-card i {
-            font-size: 3rem;
-            color: #dee2e6;
-            margin-bottom: 1rem;
-        }
-
         .toast-container {
             position: fixed;
             top: 20px;
             right: 20px;
-            z-index: 1000;
-        }
-
-        .toast {
-            background-color: white;
-            border-radius: 4px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            padding: 15px 20px;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            min-width: 250px;
-            animation: slideIn 0.3s ease-out;
-        }
-
-        .toast.success {
-            border-left: 4px solid #28a745;
-        }
-
-        .toast.error {
-            border-left: 4px solid #dc3545;
-        }
-
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+            z-index: 1050;
         }
     </style>
 </head>
 <body>
-    <!-- Toast Container -->
-    <div class="toast-container"></div>
+    <?php include 'trader_header.php'; ?>
 
-    <div class="container my-5">
-        <h2 class="mb-4">My <?= safeDisplay($category_display_names[$trader_category] ?? 'Shops') ?></h2>
-        
+    <div class="container-fluid">
         <div class="row">
-            <!-- First Shop Card -->
-            <div class="col-md-6 mb-4">
-                <div class="shop-card">
-                    <?php if (isset($existing_shops[0])): ?>
-                        <!-- Display first shop if exists -->
-                        <div class="shop-header">
-                            <span class="shop-category"><?= safeDisplay($category_display_names[$existing_shops[0]['SHOP_CATEGORY']] ?? $existing_shops[0]['SHOP_CATEGORY']) ?></span>
-                            <h3 class="shop-name"><?= safeDisplay($existing_shops[0]['SHOP_NAME']) ?></h3>
-                        </div>
-                        <div class="shop-details">
-                            <p class="shop-description"><?= safeDisplay($existing_shops[0]['DESCRIPTION']) ?></p>
-                            <div class="shop-contact">
-                                <p><i class="fas fa-envelope"></i> <?= safeDisplay($existing_shops[0]['SHOP_EMAIL']) ?></p>
-                                <p><i class="fas fa-phone"></i> <?= safeDisplay($existing_shops[0]['SHOP_CONTACT_NO']) ?></p>
-                                <p><i class="fas fa-calendar"></i> Registered: <?= date('M d, Y', strtotime($existing_shops[0]['REGISTER_DATE'])) ?></p>
-                            </div>
-                            <div class="mt-3">
-                                <a href="manage_products.php?shop_id=<?= safeDisplay($existing_shops[0]['SHOP_ID']) ?>" class="btn btn-outline-primary">
-                                    <i class="fas fa-box me-2"></i>Manage Products
-                                </a>
-                            </div>
-                        </div>
-                    <?php else: ?>
-                        <!-- Show shop creation form if no first shop -->
-                        <div class="shop-header">
-                            <h3 class="shop-name">Add Your First <?= safeDisplay($category_display_names[$trader_category] ?? 'Shop') ?></h3>
-                        </div>
-                        <div class="shop-details add-shop-form">
-                            <form method="POST">
+            <div class="col-md-3 col-lg-2 px-0">
+                <?php include 'trader_sidebar.php'; ?>
+            </div>
+            <div class="col-md-9 col-lg-10">
+                <div class="container my-5">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h1 class="h3 mb-0">My Shops</h1>
+            </div>
+            
+                    <div class="row g-4">
+                        <?php if (!empty($shops)): ?>
+                            <?php foreach ($shops as $shop): ?>
+                                <div class="col-md-6 col-lg-4">
+                                    <div class="card shop-card h-100">
+                                        <div class="card-body">
+                                            <form class="shop-form" data-shop-id="<?= $shop['SHOP_ID'] ?>">
+                                                <input type="hidden" name="action" value="update_shop">
+                                                <input type="hidden" name="shop_id" value="<?= $shop['SHOP_ID'] ?>">
+                                                
                                 <div class="mb-3">
                                     <label class="form-label">Shop Name</label>
-                                    <input type="text" name="shop_name" class="form-control" required>
+                                                    <input type="text" class="form-control" name="shop_name" 
+                                                           value="<?= htmlspecialchars($shop['SHOP_NAME']) ?>" disabled>
                                 </div>
+
                                 <div class="mb-3">
-                                    <label class="form-label">Shop Email</label>
-                                    <input type="email" name="shop_email" class="form-control" required>
+                                                    <label class="form-label">Category</label>
+                                                    <input type="text" class="form-control" name="shop_category"
+                                                           value="<?= ucfirst(htmlspecialchars($shop['SHOP_CATEGORY'])) ?>" disabled>
                                 </div>
+
                                 <div class="mb-3">
-                                    <label class="form-label">Contact Number</label>
-                                    <input type="text" name="phone_no" class="form-control" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Shop Category</label>
-                                    <input type="text" class="form-control" value="<?= safeDisplay($category_display_names[$trader_category] ?? $trader_category) ?>" disabled>
-                                </div>
-                                <button type="submit" class="btn btn-primary w-100 mt-auto">
-                                    <i class="fas fa-plus me-2"></i>Add Shop
-                                </button>
-                            </form>
-                        </div>
-                    <?php endif; ?>
-                </div>
+                                                    <label class="form-label">Email</label>
+                                                    <input type="email" class="form-control" name="shop_email" 
+                                                           value="<?= htmlspecialchars($shop['SHOP_EMAIL']) ?>" disabled>
             </div>
 
-            <!-- Second Shop Card -->
-            <div class="col-md-6 mb-4">
-                <div class="shop-card">
-                    <?php if (isset($existing_shops[1])): ?>
-                        <!-- Display second shop if exists -->
-                        <div class="shop-header">
-                            <span class="shop-category"><?= safeDisplay($category_display_names[$existing_shops[1]['SHOP_CATEGORY']] ?? $existing_shops[1]['SHOP_CATEGORY']) ?></span>
-                            <h3 class="shop-name"><?= safeDisplay($existing_shops[1]['SHOP_NAME']) ?></h3>
-                        </div>
-                        <div class="shop-details">
-                            <p class="shop-description"><?= safeDisplay($existing_shops[1]['DESCRIPTION']) ?></p>
-                            <div class="shop-contact">
-                                <p><i class="fas fa-envelope"></i> <?= safeDisplay($existing_shops[1]['SHOP_EMAIL']) ?></p>
-                                <p><i class="fas fa-phone"></i> <?= safeDisplay($existing_shops[1]['SHOP_CONTACT_NO']) ?></p>
-                                <p><i class="fas fa-calendar"></i> Registered: <?= date('M d, Y', strtotime($existing_shops[1]['REGISTER_DATE'])) ?></p>
-                            </div>
-                            <div class="mt-3">
-                                <a href="manage_products.php?shop_id=<?= safeDisplay($existing_shops[1]['SHOP_ID']) ?>" class="btn btn-outline-primary">
-                                    <i class="fas fa-box me-2"></i>Manage Products
-                                </a>
-                            </div>
-                        </div>
-                    <?php elseif (count($existing_shops) === 1): ?>
-                        <!-- Show shop creation form if first shop exists but second doesn't -->
-                        <div class="shop-header">
-                            <h3 class="shop-name">Add Your Second <?= safeDisplay($category_display_names[$trader_category] ?? 'Shop') ?></h3>
-                        </div>
-                        <div class="shop-details add-shop-form">
-                            <form method="POST">
-                                <div class="mb-3">
-                                    <label class="form-label">Shop Name</label>
-                                    <input type="text" name="shop_name" class="form-control" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Shop Email</label>
-                                    <input type="email" name="shop_email" class="form-control" required>
-                                </div>
                                 <div class="mb-3">
                                     <label class="form-label">Contact Number</label>
-                                    <input type="text" name="phone_no" class="form-control" required>
+                                                    <input type="text" class="form-control" name="shop_contact_no" 
+                                                           value="<?= htmlspecialchars($shop['SHOP_CONTACT_NO']) ?>" disabled>
                                 </div>
+
                                 <div class="mb-3">
-                                    <label class="form-label">Shop Category</label>
-                                    <input type="text" class="form-control" value="<?= safeDisplay($category_display_names[$trader_category] ?? $trader_category) ?>" disabled>
+                                                    <label class="form-label">Description</label>
+                                                    <textarea class="form-control" name="description" rows="3" 
+                                                              disabled><?= htmlspecialchars($shop['DESCRIPTION']) ?></textarea>
                                 </div>
-                                <button type="submit" class="btn btn-primary w-100 mt-auto">
-                                    <i class="fas fa-plus me-2"></i>Add Shop
+
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <small class="text-muted">
+                                                        Registered: <?= date('d M Y', strtotime($shop['REGISTER_DATE'])) ?>
+                                                    </small>
+                                                    <div class="btn-group">
+                                                        <button type="button" class="btn btn-outline-primary edit-btn">
+                                                            <i class="material-icons align-middle">edit</i>
+                                                            Edit
+                                                        </button>
+                                                        <button type="submit" class="btn btn-primary save-btn" style="display: none;">
+                                                            <i class="material-icons align-middle">save</i>
+                                                            Save
+                                                        </button>
+                                                        <button type="button" class="btn btn-outline-secondary cancel-btn" style="display: none;">
+                                                            <i class="material-icons align-middle">close</i>
+                                                            Cancel
                                 </button>
+                </div>
+            </div>
+                                            </form>
+        </div>
+        </div>
+    </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+
+                        <?php if (count($shops) < 2): ?>
+                            <div class="col-md-6 col-lg-4">
+                                <div class="card shop-card h-100">
+                                    <div class="card-body">
+                                        <form class="shop-form add-shop-form" method="POST">
+                                            <input type="hidden" name="action" value="add_shop">
+                                            
+                                <div class="mb-3">
+                                    <label class="form-label">Shop Name</label>
+                                                <input type="text" class="form-control" name="shop_name" required>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">Category</label>
+                                                <input type="text" class="form-control" value="<?= ucfirst($trader_category) ?>" disabled>
+                                </div>
+
+                                <div class="mb-3">
+                                                <label class="form-label">Email</label>
+                                                <input type="email" class="form-control" name="shop_email" required>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Contact Number</label>
+                                                <input type="text" class="form-control" name="shop_contact_no" required>
+                                </div>
+
+                                <div class="mb-3">
+                                                <label class="form-label">Description</label>
+                                                <textarea class="form-control" name="description" rows="3"></textarea>
+                                </div>
+
+                                            <div class="d-flex justify-content-end">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="material-icons align-middle">add</i>
+                                                    Add Shop
+                                </button>
+                                            </div>
                             </form>
                         </div>
-                    <?php else: ?>
-                        <!-- Show empty state if no shops exist -->
-                        <div class="empty-shop-card">
-                            <i class="fas fa-store"></i>
-                            <h4>Add Your First <?= safeDisplay($category_display_names[$trader_category] ?? 'Shop') ?></h4>
-                            <p class="text-muted">You need to create your first shop before adding a second one.</p>
+                                </div>
+                                </div>
+                        <?php endif; ?>
+                                </div>
+
+                    <?php if (empty($shops)): ?>
+                        <div class="text-center py-5">
+                            <i class="material-icons" style="font-size: 48px; color: #ccc;">store</i>
+                            <h3 class="mt-3 text-muted">No Shops Found</h3>
+                            <p class="text-muted">You haven't added any shops yet.</p>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -395,19 +363,136 @@ $category_display_names = [
         </div>
     </div>
 
+    <!-- Toast Container -->
+    <div class="toast-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Show toast message if exists
-        <?php if (isset($_SESSION['toast_message'])): ?>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Function to show toast message
+            function showToast(message, type = 'success') {
+                const toastContainer = document.querySelector('.toast-container');
             const toast = document.createElement('div');
-            toast.className = `toast ${$_SESSION['toast_type']}`;
+                toast.className = `toast align-items-center text-white bg-${type} border-0`;
+                toast.setAttribute('role', 'alert');
+                toast.setAttribute('aria-live', 'assertive');
+                toast.setAttribute('aria-atomic', 'true');
+                
             toast.innerHTML = `
-                <div><?= $_SESSION['toast_message'] ?></div>
-                <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
-            `;
-            document.querySelector('.toast-container').appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
-            <?php unset($_SESSION['toast_message'], $_SESSION['toast_type']); ?>
-        <?php endif; ?>
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                `;
+                
+                toastContainer.appendChild(toast);
+                const bsToast = new bootstrap.Toast(toast);
+                bsToast.show();
+                
+                toast.addEventListener('hidden.bs.toast', function() {
+                    toast.remove();
+                });
+            }
+
+            // Handle edit button clicks
+            document.querySelectorAll('.edit-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const form = this.closest('form');
+                    const inputs = form.querySelectorAll('input:not([type="hidden"]), textarea');
+                    const saveBtn = form.querySelector('.save-btn');
+                    const cancelBtn = form.querySelector('.cancel-btn');
+                    const editBtn = this;
+
+                    // Store original values
+                    form.originalValues = {};
+                    inputs.forEach(input => {
+                        form.originalValues[input.name] = input.value;
+                    });
+
+                    // Enable only specific fields
+                    inputs.forEach(input => {
+                        if (input.name === 'shop_name' || input.name === 'shop_contact_no' || input.name === 'description') {
+                            input.disabled = false;
+                        }
+                    });
+
+                    // Show/hide buttons
+                    editBtn.style.display = 'none';
+                    saveBtn.style.display = 'inline-block';
+                    cancelBtn.style.display = 'inline-block';
+                });
+            });
+
+            // Handle cancel button clicks
+            document.querySelectorAll('.cancel-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const form = this.closest('form');
+                    const inputs = form.querySelectorAll('input:not([type="hidden"]), textarea');
+                    const saveBtn = form.querySelector('.save-btn');
+                    const cancelBtn = this;
+                    const editBtn = form.querySelector('.edit-btn');
+
+                    // Restore original values and disable all inputs
+                    inputs.forEach(input => {
+                        input.value = form.originalValues[input.name];
+                        input.disabled = true;
+                    });
+
+                    // Show/hide buttons
+                    editBtn.style.display = 'inline-block';
+                    saveBtn.style.display = 'none';
+                    cancelBtn.style.display = 'none';
+                });
+            });
+
+            // Handle form submissions
+            document.querySelectorAll('.shop-form').forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const formData = new FormData(this);
+
+                    // Log form data for debugging
+                    for (let pair of formData.entries()) {
+                        console.log(pair[0] + ': ' + pair[1]);
+                    }
+
+                    fetch(window.location.href, {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.text())
+                    .then(() => {
+                        if (this.classList.contains('add-shop-form')) {
+                            // For add shop form, reload the page
+                            window.location.reload();
+                        } else {
+                            // For edit form
+                            const inputs = this.querySelectorAll('input:not([type="hidden"]), textarea');
+                            const saveBtn = this.querySelector('.save-btn');
+                            const cancelBtn = this.querySelector('.cancel-btn');
+                            const editBtn = this.querySelector('.edit-btn');
+
+                            // Disable inputs
+                            inputs.forEach(input => {
+                                input.disabled = true;
+                            });
+
+                            // Show/hide buttons
+                            editBtn.style.display = 'inline-block';
+                            saveBtn.style.display = 'none';
+                            cancelBtn.style.display = 'none';
+
+                            showToast('Shop updated successfully!');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Failed to update shop. Please try again.', 'danger');
+                    });
+                });
+            });
+        });
     </script>
 </body>
 </html>

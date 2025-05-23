@@ -243,10 +243,31 @@ oci_execute($order_details_stmt);
 $order_details = oci_fetch_array($order_details_stmt, OCI_ASSOC);
 
 // Get order items
-$order_items_sql = "SELECT * FROM order_item WHERE order_id = :order_id";
+$order_items_sql = "SELECT oi.*, p.product_name, p.price as unit_price 
+                    FROM order_item oi 
+                    JOIN product p ON oi.product_id = p.product_id 
+                    WHERE oi.order_id = :order_id";
 $order_items_stmt = oci_parse($conn, $order_items_sql);
 oci_bind_by_name($order_items_stmt, ":order_id", $order_id);
 oci_execute($order_items_stmt);
+
+// Calculate totals
+$subtotal = 0;
+$discount_amount = 0;
+$items = [];
+
+while ($item = oci_fetch_array($order_items_stmt, OCI_ASSOC)) {
+    $item_total = $item['QUANTITY'] * $item['UNIT_PRICE'];
+    $subtotal += $item_total;
+    $items[] = $item;
+}
+
+// Calculate discount if coupon was applied
+if (isset($order_details['COUPON_DISCOUNT_PERCENT']) && $order_details['COUPON_DISCOUNT_PERCENT'] > 0) {
+    $discount_amount = $subtotal * ($order_details['COUPON_DISCOUNT_PERCENT'] / 100);
+}
+
+$final_total = $subtotal - $discount_amount;
 
 // Get PayPal response data
 $txn_id = $_GET['tx'] ?? '';
@@ -314,6 +335,13 @@ error_log("Session Data: " . print_r($_SESSION, true));
             border-top: 2px solid #eee;
             font-weight: bold;
         }
+        .discount-row {
+            color: #28a745;
+        }
+        .total-row {
+            font-weight: bold;
+            border-top: 2px solid #eee;
+        }
     </style>
 </head>
 <body>
@@ -364,28 +392,34 @@ error_log("Session Data: " . print_r($_SESSION, true));
                     <td>Total</td>
                 </tr>
 
-                <?php 
-                $subtotal = 0;
-                while ($item = oci_fetch_array($order_items_stmt, OCI_ASSOC)): 
-                    $item_total = $item['QUANTITY'] * $item['UNIT_PRICE'];
-                    $subtotal += $item_total;
-                ?>
+                <?php foreach ($items as $item): ?>
                 <tr class="item">
                     <td><?= htmlspecialchars($item['PRODUCT_NAME']) ?></td>
                     <td><?= $item['QUANTITY'] ?></td>
                     <td>Rs. <?= number_format($item['UNIT_PRICE'], 2) ?></td>
-                    <td>Rs. <?= number_format($item_total, 2) ?></td>
+                    <td>Rs. <?= number_format($item['QUANTITY'] * $item['UNIT_PRICE'], 2) ?></td>
                 </tr>
-                <?php endwhile; ?>
+                <?php endforeach; ?>
 
                 <tr class="total">
                     <td colspan="3"></td>
                     <td>
-                        Subtotal: Rs. <?= number_format($subtotal, 2) ?><br>
-                        <?php if (isset($order_details['COUPON_DISCOUNT_PERCENT']) && $order_details['COUPON_DISCOUNT_PERCENT']): ?>
-                            Discount: -Rs. <?= number_format($subtotal * ($order_details['COUPON_DISCOUNT_PERCENT'] / 100), 2) ?><br>
+                        <table class="w-100">
+                            <tr>
+                                <td>Subtotal:</td>
+                                <td class="text-end">Rs. <?= number_format($subtotal, 2) ?></td>
+                            </tr>
+                            <?php if ($discount_amount > 0): ?>
+                            <tr class="discount-row">
+                                <td>Discount (<?= $order_details['COUPON_DISCOUNT_PERCENT'] ?>%):</td>
+                                <td class="text-end">- Rs. <?= number_format($discount_amount, 2) ?></td>
+                            </tr>
                         <?php endif; ?>
-                        Total: Rs. <?= number_format($order_details['TOTAL_AMOUNT'], 2) ?>
+                            <tr class="total-row">
+                                <td>Total:</td>
+                                <td class="text-end">Rs. <?= number_format($final_total, 2) ?></td>
+                            </tr>
+                        </table>
                     </td>
                 </tr>
             </table>

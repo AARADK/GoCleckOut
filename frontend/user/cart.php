@@ -334,11 +334,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout']
     echo '<input type="hidden" name="currency_code" value="GBP">';
     echo '<input type="hidden" name="quantity" value="1">';
     
-    echo '<input type="hidden" name="return" value="http://localhost/GCO/frontend/user/payment_success.php?amount=' . $final_total . '&cart_id=' . $cart_id . '&timeslot_id=' . $selected_timeslot_id . '&coupon_id=' . $coupon_id . '&user_id=' . $_SESSION['user_id'] . '">&logged_in=true';
+    echo '<input type="hidden" name="return" value="http://localhost/GCO/frontend/user/payment_success.php?amount=' . $final_total . '&cart_id=' . $cart_id . '&timeslot_id=' . $selected_timeslot_id . '&coupon_id=' . $coupon_id . '&user_id=' . $_SESSION['user_id'] . '&logged_in=true">';
     echo '<input type="hidden" name="cancel_return" value="http://localhost/GCO/frontend/user/payment_cancel.php?user_id=' . $_SESSION['user_id'] . '&logged_in=true">';
-    echo '<input type="image" name="submit" border="0" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynow_LG.gif" alt="PayPal - The safer, easier way to pay online">';
+    echo '<input type="image" style="display: none;" name="submit" border="0" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynow_LG.gif" alt="PayPal - The safer, easier way to pay online">';
     echo '<img alt="" border="0" width="1" height="1" src="https://www.paypalobjects.com/en_US/i/scr/pixel.gif">';
     echo '</form>';
+    echo '<script>document.forms[0].submit();</script>';
     exit;
 }
 ?>
@@ -809,11 +810,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout']
                 badge.textContent = `${totalItems} Items`;
             }
 
-            // Get discount if coupon is applied
-            const discountElement = document.querySelector('.summary-item.text-success span:last-child');
-            const discount = discountElement ? parseFloat(discountElement.textContent.replace('Rs. ', '').replace(',', '')) : 0;
-            
-            const total = subtotal - discount;
+            // Get discount percentage from the applied coupon display
+            const appliedCoupon = document.querySelector('.applied-coupon');
+            let discount = 0;
+            if (appliedCoupon) {
+                const discountPercent = parseInt(appliedCoupon.querySelector('.text-muted').textContent);
+                if (!isNaN(discountPercent)) {
+                    discount = (subtotal * discountPercent) / 100;
+                }
+            }
+
+            // Calculate total as subtotal minus discount
+            const total = Math.max(0, subtotal - discount);
 
             // Update subtotal and total displays
             const subtotalElement = document.getElementById('cart-subtotal');
@@ -826,10 +834,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout']
                 totalElement.textContent = `Rs. ${total.toFixed(2)}`;
             }
 
+            // Update discount display if it exists
+            const discountElement = document.querySelector('.summary-item.text-success span:last-child');
+            if (discountElement) {
+                discountElement.textContent = `- Rs. ${discount.toFixed(2)}`;
+            }
+
             // Update increase buttons based on total items
             document.querySelectorAll('.increase-btn').forEach(btn => {
                 btn.disabled = totalItems >= 20;
             });
+
+            // Update the PayPal form amount if it exists
+            const paypalAmountInput = document.querySelector('input[name="amount"]');
+            if (paypalAmountInput) {
+                paypalAmountInput.value = total.toFixed(2);
+            }
         }
 
         function updateQuantity(productId, action) {
@@ -838,13 +858,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout']
             const decreaseBtn = cartItem.querySelector('.decrease-btn');
             const increaseBtn = cartItem.querySelector('.increase-btn');
             const removeBtn = cartItem.querySelector('.remove-btn');
-            const itemSubtotal = cartItem.querySelector('.item-subtotal');
             const itemPrice = parseFloat(cartItem.querySelector('.item-price').dataset.price);
+            const itemSubtotal = cartItem.querySelector('.item-subtotal');
 
-            // Store current quantity for potential revert
-            const currentQuantity = parseInt(quantityDisplay.textContent);
-
-            // Disable all buttons during update
+            // Disable buttons during update
             decreaseBtn.disabled = true;
             increaseBtn.disabled = true;
             if (removeBtn) removeBtn.disabled = true;
@@ -872,6 +889,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout']
                         const newSubtotal = (itemPrice * data.new_quantity).toFixed(2);
                         itemSubtotal.textContent = `Rs. ${newSubtotal}`;
                         decreaseBtn.disabled = data.new_quantity <= 1;
+                        increaseBtn.disabled = false;
+                        if (removeBtn) removeBtn.disabled = false;
                     }
 
                     // Update cart totals
@@ -880,14 +899,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['proceed_to_checkout']
                     showToast(data.message);
                 } else {
                     showToast(data.message, 'error');
+                    // Restore previous state on error
+                    decreaseBtn.disabled = parseInt(quantityDisplay.textContent) <= 1;
+                    increaseBtn.disabled = false;
+                    if (removeBtn) removeBtn.disabled = false;
                 }
             })
             .catch(error => {
                 showToast('An error occurred while updating the cart', 'error');
-            })
-            .finally(() => {
-                // Restore button states
-                decreaseBtn.disabled = data.new_quantity <= 1;
+                // Restore previous state on error
+                decreaseBtn.disabled = parseInt(quantityDisplay.textContent) <= 1;
                 increaseBtn.disabled = false;
                 if (removeBtn) removeBtn.disabled = false;
             });

@@ -1,16 +1,25 @@
-<link rel="stylesheet" href="../css/trader/header.css">
+<?php
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
-<nav class="navbar navbar-expand-lg navbar-light bg-light">
-    <a class="navbar-brand" href="trader_dashboard.php">GoCleckOut - Trader Interface</a>
-    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavAltMarkup" aria-controls="navbarNavAltMarkup" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-    </button>
-    <div class="collapse navbar-collapse" id="navbarNavAltMarkup">
-        <div class="navbar-nav">
-            <a class="nav-item nav-link active" href="index.php?page=dashboard">Home <span class="sr-only">(current)</span></a>
-            <a class="nav-item nav-link" href="index.php?page=products">Products</a>
-            <a class="nav-item nav-link" href="index.php?page=customers">Customers</a>
-            <a class="nav-item nav-link" href="../login/login_portal.php?sign_in=true">Logout</a>
-        </div>
-    </div>
+// Check if user is logged in
+if (!isset($_SESSION['user_id'])) {
+    header("Location: ../login/login_portal.php");
+    exit;
+}
+?>
+
+<style>
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+    padding: 1rem;
+}
+.navbar-brand {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+</style>
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light container-fluid justify-content-center">
+    <img src="../assets/logo.png" alt="GoCleckOut Logo" class="img-fluid" style="width: 90px; height: 40px;">
+    <a class="navbar-brand text-center" href="trader_dashboard.php">GoCleckOut - Trader Interface</a>
 </nav>

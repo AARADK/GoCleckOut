@@ -19,7 +19,7 @@ $routePatternParts = array_map(function ($route) {
 $routePattern = implode('|', $routePatternParts);
 
 // Start building .htaccess content
-$htaccess = "RewriteEngine On\n\n";
+$htaccess = "# RewriteEngine On\n\n";
 
 // Allow exact non-PHP routes
 foreach ($exactRoutes as $route) {
@@ -39,4 +39,8 @@ $htaccess .= "RewriteRule ^ index.php [QSA,L]\n";
 // Write the file
 file_put_contents(__DIR__ . '/.htaccess', $htaccess);
 
-echo "<pre>{$_SERVER['REQUEST_URI']}\n.htaccess written:\n\n$htaccess</pre>";
+// echo "<pre>{$_SERVER['REQUEST_URI']}\n.htaccess written:\n\n$htaccess</pre>";
+
+header("Location: /GCO/frontend/home.php");
+exit();
+

@@ -59,7 +59,7 @@ oci_free_statement($stmt);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Orders - GoCleckOut</title>
+    <title>Invoices - GoCleckOut</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -115,7 +115,7 @@ oci_free_statement($stmt);
     <?php include "../header.php" ?>
 
     <div class="orders-container">
-        <h2 class="mb-4">My Orders</h2>
+        <h2 class="mb-4">Invoices</h2>
         
         <?php if ($has_orders): ?>
             <?php foreach ($orders as $order): ?>

@@ -74,26 +74,37 @@ executeSQLNoWarnings($conn, "DROP TABLE wishlist CASCADE CONSTRAINTS");
 
 executeSQLNoWarnings($conn, "DROP TABLE wishlist_product CASCADE CONSTRAINTS");
 
+executeSQLNoWarnings($conn, "DROP TRIGGER trg_product_category_pk");
+executeSQLNoWarnings($conn, "DROP SEQUENCE product_category_seq");
 executeSQLNoWarnings($conn, "DROP TABLE product_category CASCADE CONSTRAINTS");
 
 executeSQLNoWarnings($conn, "DROP TRIGGER trg_coupon_pk");
 executeSQLNoWarnings($conn, "DROP SEQUENCE coupon_seq");
 executeSQLNoWarnings($conn, "DROP TABLE coupon CASCADE CONSTRAINTS");
 
-// Drop order_item related objects
 executeSQLNoWarnings($conn, "DROP TABLE order_item CASCADE CONSTRAINTS");
 executeSQLNoWarnings($conn, "DROP SEQUENCE order_item_seq");
 executeSQLNoWarnings($conn, "DROP TRIGGER trg_order_item_pk");
 executeSQLNoWarnings($conn, "DROP TRIGGER trg_populate_order_item");
 
-// Reorder the table creation sequence
 if ($conn) {
-
+    // PRODUCT_CATEGORY TABLE
     executeSQL($conn, "
         CREATE TABLE product_category (
             category_id NUMBER PRIMARY KEY,
             category_name VARCHAR2(50)
         )
+    ");
+
+    executeSQL($conn, "CREATE SEQUENCE product_category_seq START WITH 1 INCREMENT BY 1");
+
+    executeSQL($conn, "
+        CREATE OR REPLACE TRIGGER trg_product_category_pk
+        BEFORE INSERT ON product_category
+        FOR EACH ROW
+        BEGIN
+            SELECT product_category_seq.NEXTVAL INTO :new.category_id FROM dual;
+        END;
     ");
 
     // USERS TABLE
@@ -122,21 +133,41 @@ if ($conn) {
         END;");
     executeSQL($conn, "
         CREATE OR REPLACE TRIGGER trg_trader_active
-        AFTER UPDATE ON users
-        FOR EACH ROW
-        WHEN (
-            NEW.status = 'active' AND 
-            NEW.role = 'trader' AND 
-            OLD.status != 'active'
-        )
-        BEGIN
-            UPDATE users
-            SET status = 'inactive'
-            WHERE role = 'trader'
-            AND category_id = :NEW.category_id
-            AND user_id != :NEW.user_id
-            AND status = 'active';
-        END;
+        FOR UPDATE ON users
+        COMPOUND TRIGGER
+            -- Variables to store the new trader's information
+            v_new_user_id NUMBER;
+            v_new_category_id NUMBER;
+            v_new_status VARCHAR2(10);
+            v_new_role VARCHAR2(10);
+            v_old_status VARCHAR2(10);
+            
+            -- Before each row, store the values we need
+            BEFORE EACH ROW IS
+            BEGIN
+                v_new_user_id := :NEW.user_id;
+                v_new_category_id := :NEW.category_id;
+                v_new_status := :NEW.status;
+                v_new_role := :NEW.role;
+                v_old_status := :OLD.status;
+            END BEFORE EACH ROW;
+            
+            -- After the statement, perform the update if conditions are met
+            AFTER STATEMENT IS
+            BEGIN
+                IF v_new_status = 'active' AND 
+                   v_new_role = 'trader' AND 
+                   v_old_status != 'active' THEN
+                    
+                    UPDATE users
+                    SET status = 'inactive'
+                    WHERE role = 'trader'
+                    AND category_id = v_new_category_id
+                    AND user_id != v_new_user_id
+                    AND status = 'active';
+                END IF;
+            END AFTER STATEMENT;
+        END trg_trader_active;
     ");
 
     // CART TABLE - create before PRODUCT for proper referencing
@@ -374,7 +405,6 @@ if ($conn) {
         END;
     ");
 
-    // Insert active coupons
     executeSQL($conn, "
         INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
         VALUES ('WELCOME20', SYSDATE, ADD_MONTHS(SYSDATE, 3), 'Welcome discount for new customers', 20)
@@ -395,7 +425,6 @@ if ($conn) {
         VALUES ('FIRST10', SYSDATE, ADD_MONTHS(SYSDATE, 1), 'First order discount', 10)
     ");
 
-    // Insert expired coupons
     executeSQL($conn, "
         INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
         VALUES ('WINTER10', ADD_MONTHS(SYSDATE, -3), ADD_MONTHS(SYSDATE, -1), 'Winter sale discount', 10)
@@ -411,7 +440,6 @@ if ($conn) {
         VALUES ('SPRING20', ADD_MONTHS(SYSDATE, -2), ADD_MONTHS(SYSDATE, -1), 'Spring cleaning sale', 20)
     ");
 
-    // Insert future coupons
     executeSQL($conn, "
         INSERT INTO coupon (coupon_code, coupon_start_date, coupon_end_date, coupon_description, coupon_discount_percent)
         VALUES ('AUTUMN25', ADD_MONTHS(SYSDATE, 1), ADD_MONTHS(SYSDATE, 3), 'Autumn special discount', 25)
@@ -422,7 +450,6 @@ if ($conn) {
         VALUES ('BLACKFRIDAY40', ADD_MONTHS(SYSDATE, 2), ADD_MONTHS(SYSDATE, 2) + 7, 'Black Friday special', 40)
     ");
     
-    // PAYMENT TABLE
     executeSQL($conn, "
         CREATE TABLE payment (
             payment_id NUMBER PRIMARY KEY,

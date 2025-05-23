@@ -214,7 +214,7 @@ oci_free_statement($stmt);
                 <?php include 'trader_sidebar.php'; ?>
             </div>
             <div class="col-md-9 col-lg-10">
-                <div class="mt-5 p-4">
+                <div class="p-4">
                     <div class="mb-4">
                         <h1 class="h3">Welcome back!</h1>
                         <p class="text-muted">Here's what's happening with your business today.</p>
