@@ -32,13 +32,17 @@ def read_rfid():
                         time.sleep(3)
 
             except serial.SerialException:
+                print('SerialException: Device not found')
                 break
             except UnicodeDecodeError:
+                print('UnicodeDecodeError: Invalid data received')
                 continue
 
             time.sleep(0.1)
 
     except serial.SerialException:
+        print('SerialException: Unable to open serial port')
+    except OSError:
         pass
     except KeyboardInterrupt:
         pass

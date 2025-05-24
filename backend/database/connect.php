@@ -13,7 +13,4 @@ function getDBConnection() {
     return $conn;
 }
 
-function create_unique_id() {
-    return bin2hex(random_bytes(16));
-}
 ?>
